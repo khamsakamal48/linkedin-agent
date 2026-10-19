@@ -51,7 +51,7 @@ scripts/add-account.sh acct-a
    ================ SEND THIS TO THE ACCOUNT OWNER ================
    Link:      https://li-login.yourorg.com/vnc_lite.html#?path=websockify%3Ftoken%3D...&scale=true
    Username:  owner
-   Password:  Xy7k2Qm9pLw4
+   Password:  <password printed by the script>
    ...
    ```
    **Copy the whole link.** The part after `#` is the access token, so the link fails without it. Send the link and the password through separate channels if you can (for example the link by email and the password by WhatsApp or a call).
