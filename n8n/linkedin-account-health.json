@@ -1,0 +1,233 @@
+{
+  "name": "LinkedIn – account health",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "166fe9e1-b10e-53eb-a527-4cc5993a9754",
+      "name": "Every 2 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One entry per running account. Keep in sync with docker-compose.accounts.yml.\nreturn [\n  { account: 'acct-a',   endpoint: 'http://li-profile-acct-a:8080/mcp', tool: 'get_my_profile',\n    fix: 'scripts/add-account.sh acct-a --relogin' },\n  { account: 'salesnav', endpoint: 'http://li-salesnav:8000/mcp',       tool: 'linkedin_session_status',\n    fix: 'Open the Sales Navigator browser page and log in again (docs/ACCOUNT-SETUP.md)' },\n].map(json => ({ json }));"
+      },
+      "id": "dad6a38f-5306-5e51-8b48-63b99f7141d8",
+      "name": "Accounts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "05ce87f9-0618-540b-8a1f-801ab66f21b7",
+      "name": "Loop accounts",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        440,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "endpointUrl": "={{ $json.endpoint }}",
+        "tool": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.tool }}"
+        },
+        "inputMode": "json",
+        "jsonInput": "{}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "67af31c9-9905-58d2-927f-b958b47de268",
+      "name": "Check session",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        380
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Runs once per loop iteration (one account; the MCP node only honours the first item's endpoint).\nconst a = $('Loop accounts').first().json;\nlet ok = !$json.error, why = ok ? '' : String($json.error.message ?? $json.error);\nif (ok && a.tool === 'linkedin_session_status') {\n  const r = $json.structuredContent ?? $json.content?.find(c => c.type === 'text')?.text ?? $json;\n  const s = JSON.stringify(r).toLowerCase();\n  // shortcut: loose match on the status text; tighten once a real status payload is seen.\n  if (/not (logged|authenticated)|unauthenticated|\"authenticated\":false|login required/.test(s)) { ok = false; why = s.slice(0, 300); }\n}\nreturn [{ json: { ...a, ok, why } }];"
+      },
+      "id": "691f1acd-cb5a-5c35-a34a-40a443384f81",
+      "name": "Evaluate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        380
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into linkedin.scrape_log (account, tool, target, ok, error) values ($1, 'health', $2, $3, nullif($4, ''))",
+        "options": {
+          "queryReplacement": "={{ [$json.account, $json.tool, $json.ok, $json.why] }}"
+        }
+      },
+      "id": "6db0871f-54ad-5544-a1ea-207f8e95725b",
+      "name": "Log health",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1100,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().filter(i => !i.json.ok);"
+      },
+      "id": "7476a0f1-5d86-5283-8182-50b085ff46be",
+      "name": "Only failures",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "REPLACE_ME@example.com",
+        "toEmail": "REPLACE_ME@example.com",
+        "subject": "=LinkedIn account {{ $json.account }} is logged out",
+        "emailFormat": "text",
+        "text": "=Account: {{ $json.account }}\nCheck: {{ $json.tool }}\nError: {{ $json.why }}\n\nFix on the server:\n  {{ $json.fix }}\nThen send the printed link and password to the account owner.",
+        "options": {}
+      },
+      "id": "630c14d1-9d2d-5e68-a2a6-2c9cab6a0ce5",
+      "name": "Alert admin",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        880,
+        160
+      ],
+      "credentials": {
+        "smtp": {
+          "id": "REPLACE_ME",
+          "name": "SMTP"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 2 hours": {
+      "main": [
+        [
+          {
+            "node": "Accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accounts": {
+      "main": [
+        [
+          {
+            "node": "Loop accounts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop accounts": {
+      "main": [
+        [
+          {
+            "node": "Only failures",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Check session",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check session": {
+      "main": [
+        [
+          {
+            "node": "Evaluate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate": {
+      "main": [
+        [
+          {
+            "node": "Loop accounts",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Log health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Only failures": {
+      "main": [
+        [
+          {
+            "node": "Alert admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

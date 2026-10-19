@@ -1,0 +1,647 @@
+{
+  "name": "LinkedIn – profile ingest",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-profile",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "6c0cbf5a-d9c0-5f27-b44c-e770cf84f49d",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "f62c032a-9683-5b18-b4e0-9355941e89f9"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Account this workflow scrapes with. To add an account, duplicate the workflow\n// and change these three values (see README \"Adding accounts\").\nconst cfg = { account: 'acct-a', endpoint: 'http://li-profile-acct-a:8080/mcp', dailyCap: 80, maxAgeDays: 90 };\nconst body = $json.body ?? $json;\nconst url = String(body.url ?? '').trim();\nif (!/linkedin\\.com\\/in\\/[^/?#]+/i.test(url)) throw new Error('Body must be {\"url\": \"https://www.linkedin.com/in/<id>/\"}');\nreturn [{ json: { ...cfg, url, force: body.force === true } }];"
+      },
+      "id": "2bb4bad2-66cd-58bd-adce-2eae06202c6f",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from linkedin.fresh_profile($1, $2)",
+        "options": {
+          "queryReplacement": "={{ [$json.url, $json.maxAgeDays] }}"
+        }
+      },
+      "id": "722bcf6e-1f63-577c-8598-d5e963ad06bd",
+      "name": "Cache lookup",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        440,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      },
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "10fead28-f376-5dbc-a120-869f7651da0c",
+              "leftValue": "={{ !!$json.profile && !$('Config').first().json.force }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "540cff85-4e1e-52fa-b5fe-1a0b90ef44b7",
+      "name": "Cached and not forced?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        660,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { source: 'cache', scraped_at: $json.scraped_at, profile: $json.profile } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "72058aa7-a6c5-566a-82da-5e98c8343708",
+      "name": "Respond cached",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        880,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select linkedin.under_daily_cap($1, 'get_person_profile', $2) as ok",
+        "options": {
+          "queryReplacement": "={{ [$('Config').first().json.account, $('Config').first().json.dailyCap] }}"
+        }
+      },
+      "id": "dde79240-a2b3-5c41-aa93-17446c20064c",
+      "name": "Daily cap check",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        880,
+        420
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "aee4363b-7333-5e07-bf6d-dfcfc8e035cd",
+              "leftValue": "={{ $json.ok }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "41b0bb51-84cf-5e6d-aae6-06a8bc292ee3",
+      "name": "Under cap?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: 'daily cap reached for ' + $('Config').first().json.account } }}",
+        "options": {
+          "responseCode": 429
+        }
+      },
+      "id": "b0dce98e-290f-5bb0-b67f-4d56037d70a6",
+      "name": "Respond cap reached",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1320,
+        580
+      ]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": "={{ 30 + Math.floor(Math.random() * 60) }}",
+        "unit": "seconds"
+      },
+      "id": "7441d425-8fa1-52b9-b487-815f5e4b866c",
+      "name": "Human pacing",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        340
+      ],
+      "webhookId": "cb0a569e-d974-5d36-b5f8-15aa0cd7eec0"
+    },
+    {
+      "parameters": {
+        "endpointUrl": "={{ $('Config').first().json.endpoint }}",
+        "tool": {
+          "__rl": true,
+          "mode": "id",
+          "value": "get_person_profile"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify({ linkedin_username: $('Config').first().json.url, sections: 'experience,education', max_scrolls: 10 }) }}",
+        "options": {
+          "timeout": 240000
+        }
+      },
+      "id": "5efaff4f-435f-54b0-afc9-a684023fc9f4",
+      "name": "Scrape profile",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        340
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "dbdf8823-7654-50ac-b068-229eba0906ae",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "32a5093d-32e6-54d0-bf97-3f8ac2b7c0de",
+      "name": "Scrape failed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into linkedin.scrape_log (account, tool, target, ok, error) values ($1, 'get_person_profile', $2, false, $3)",
+        "options": {
+          "queryReplacement": "={{ [$('Config').first().json.account, $('Config').first().json.url, String($json.error.message ?? $json.error)] }}"
+        }
+      },
+      "id": "da3ee79e-5304-5f4c-9a2e-dc16cd8b71cb",
+      "name": "Log failure",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1980,
+        500
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { error: $('Scrape failed?').first().json.error.message } }}",
+        "options": {
+          "responseCode": 502
+        }
+      },
+      "id": "2f298c4a-5790-543d-800d-dc393dbd0d1e",
+      "name": "Respond scrape error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2200,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const r = $json.structuredContent ?? $json.content?.find(c => c.type === 'text')?.text ?? $json;\nconst cfg = $('Config').first().json;\nconst schema = {\n  type: 'object',\n  properties: {\n    full_name: { type: 'string' }, headline: { type: 'string' }, location: { type: 'string' },\n    about: { type: 'string' }, current_company: { type: 'string' }, current_title: { type: 'string' },\n    employment: { type: 'array', items: { type: 'object', properties: {\n      company_name: { type: 'string' }, company_linkedin_url: { type: 'string' }, title: { type: 'string' },\n      employment_type: { type: 'string' }, location: { type: 'string' },\n      start_date: { type: 'string', description: 'YYYY-MM or YYYY' },\n      end_date: { type: 'string', description: 'YYYY-MM or YYYY; empty if current' },\n      is_current: { type: 'boolean' }, description: { type: 'string' } },\n      required: ['company_name', 'title'] } },\n    education: { type: 'array', items: { type: 'object', properties: {\n      school: { type: 'string' }, school_linkedin_url: { type: 'string' }, degree: { type: 'string' },\n      field_of_study: { type: 'string' }, start_year: { type: 'integer' }, end_year: { type: 'integer' } },\n      required: ['school'] } } },\n  required: ['full_name', 'employment', 'education'] };\nconst request = {\n  model: 'claude-haiku-5-5', max_tokens: 16000,\n  tools: [{ name: 'save_profile', description: 'Save the structured LinkedIn profile.', input_schema: schema }],\n  tool_choice: { type: 'tool', name: 'save_profile' },\n  messages: [{ role: 'user', content:\n    'Below is raw text scraped from a LinkedIn profile (main page plus experience and education sections). ' +\n    'Extract every job and every degree, newest first. A company with several roles yields one entry per role. ' +\n    'Use only facts present in the text; leave a field out when unknown. Profile URL: ' + cfg.url +\n    '\\n\\n' + JSON.stringify(r) }] };\nreturn [{ json: { request, raw: r } }];"
+      },
+      "id": "2d93ab2e-dc4a-5ea7-bd88-1b6d9533cc45",
+      "name": "Build extraction request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1980,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "e3a00e86-1e9c-53f0-b8bc-f2db589a3a5b",
+      "name": "Claude: structure profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2200,
+        260
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const cfg = $('Config').first().json;\nconst toolUse = ($json.content ?? []).find(c => c.type === 'tool_use');\nif (!toolUse) throw new Error('Extraction returned no structured profile: ' + JSON.stringify($json).slice(0, 500));\nconst payload = { ...toolUse.input, linkedin_url: cfg.url, raw: $('Build extraction request').first().json.raw, source: cfg.account };\nreturn [{ json: { payload: JSON.stringify(payload) } }];"
+      },
+      "id": "b80d9080-1065-5de8-b65e-45cf3ad3c915",
+      "name": "Build DB payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select linkedin.upsert_profile($1::jsonb) as person_id",
+        "options": {
+          "queryReplacement": "={{ [$json.payload] }}"
+        }
+      },
+      "id": "93a53e7c-e763-5847-942e-aabe9a3ab1d3",
+      "name": "Upsert profile",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2640,
+        260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into linkedin.scrape_log (account, tool, target, ok) values ($1, 'get_person_profile', $2, true)",
+        "options": {
+          "queryReplacement": "={{ [$('Config').first().json.account, $('Config').first().json.url] }}"
+        }
+      },
+      "id": "d27054ec-7f4b-50a3-aaee-ecaf030333f8",
+      "name": "Log success",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2860,
+        260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from linkedin.fresh_profile($1, 36500)",
+        "options": {
+          "queryReplacement": "={{ [$('Config').first().json.url] }}"
+        }
+      },
+      "id": "87c6f463-3f46-5b06-a84a-e5c1fe4fce05",
+      "name": "Read back",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3080,
+        260
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { source: 'linkedin', scraped_at: $json.scraped_at, profile: $json.profile } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "27b55e39-c779-5245-afb3-89593c95c647",
+      "name": "Respond scraped",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        3300,
+        260
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Cache lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cache lookup": {
+      "main": [
+        [
+          {
+            "node": "Cached and not forced?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cached and not forced?": {
+      "main": [
+        [
+          {
+            "node": "Respond cached",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Daily cap check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Daily cap check": {
+      "main": [
+        [
+          {
+            "node": "Under cap?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Under cap?": {
+      "main": [
+        [
+          {
+            "node": "Human pacing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond cap reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Human pacing": {
+      "main": [
+        [
+          {
+            "node": "Scrape profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape profile": {
+      "main": [
+        [
+          {
+            "node": "Scrape failed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape failed?": {
+      "main": [
+        [
+          {
+            "node": "Log failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Build extraction request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log failure": {
+      "main": [
+        [
+          {
+            "node": "Respond scrape error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build extraction request": {
+      "main": [
+        [
+          {
+            "node": "Claude: structure profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: structure profile": {
+      "main": [
+        [
+          {
+            "node": "Build DB payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build DB payload": {
+      "main": [
+        [
+          {
+            "node": "Upsert profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upsert profile": {
+      "main": [
+        [
+          {
+            "node": "Log success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log success": {
+      "main": [
+        [
+          {
+            "node": "Read back",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read back": {
+      "main": [
+        [
+          {
+            "node": "Respond scraped",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

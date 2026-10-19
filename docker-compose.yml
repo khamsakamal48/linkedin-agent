@@ -1,0 +1,47 @@
+# Base stack. LinkedIn profile accounts live in docker-compose.accounts.yml,
+# which scripts/add-account.sh writes; .env sets COMPOSE_FILE to load both.
+name: linkedin-agent
+
+services:
+  li-postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PG_DB:-linkedin}
+      POSTGRES_USER: ${PG_USER:-linkedin}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env}
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    ports:
+      - "127.0.0.1:5433:5432"
+    networks: [linkedin]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      retries: 5
+
+  # Sales Navigator: one account with a Sales Navigator seat.
+  # The account owner logs in through the noVNC page (see docs/ACCOUNT-SETUP.md).
+  li-salesnav:
+    build: ./salesnav
+    image: linkedin-agent/li-salesnav:local
+    restart: unless-stopped
+    env_file:
+      - path: accounts/salesnav.env
+        required: false
+    environment:
+      LSN_DAILY_SEARCHES: ${SN_DAILY_SEARCHES:-30}
+      LSN_DAILY_PROFILE_VIEWS: ${SN_DAILY_PROFILE_VIEWS:-80}
+    volumes:
+      - ./data/salesnav:/data
+    ports:
+      - "127.0.0.1:8100:8000"   # MCP (Nginx -> Claude)
+      - "127.0.0.1:6081:6080"   # noVNC login/watch page (Nginx -> account owner)
+    shm_size: 1gb
+    networks: [linkedin]
+    profiles: [salesnav]
+
+networks:
+  linkedin:
+    name: linkedin

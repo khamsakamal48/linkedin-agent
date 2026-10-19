@@ -1,0 +1,348 @@
+{
+  "name": "LinkedIn – CSR lead discovery (Sales Navigator)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "csr-leads",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "6c0cbf5a-d9c0-5f27-b44c-e770cf84f49d",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "webhookId": "3f71a819-9038-5ccd-9fcc-91aa1c4cc391"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $json.body ?? $json;\nconst company = String(body.company ?? '').trim();\nif (!company) throw new Error('Body must be {\"company\": \"<name>\", \"cin\": \"<optional CIN>\"}');\nconst endpoint = 'http://li-salesnav:8000/mcp';\n// Two Sales Navigator searches per company: CSR/sustainability roles, then HR (often owns CSR in India).\nconst searches = [\n  { pass: 'csr', keywords: 'CSR OR \"corporate social responsibility\" OR sustainability OR ESG OR foundation OR \"social impact\" OR \"community affairs\"' },\n  { pass: 'hr',  keywords: '\"human resources\" OR CHRO OR \"HR head\" OR \"people officer\"' },\n];\nreturn searches.map(s => ({ json: { company, cin: body.cin ?? '', endpoint, ...s } }));"
+      },
+      "id": "2bb4bad2-66cd-58bd-adce-2eae06202c6f",
+      "name": "Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "endpointUrl": "={{ $json.endpoint }}",
+        "tool": {
+          "__rl": true,
+          "mode": "id",
+          "value": "linkedin_search_leads"
+        },
+        "inputMode": "json",
+        "jsonInput": "={{ JSON.stringify({ company: $json.company, keywords: $json.keywords }) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "df9f574b-a38a-586e-b534-4962fe3af1a0",
+      "name": "Sales Navigator search",
+      "type": "@n8n/n8n-nodes-langchain.mcpClient",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        300
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into linkedin.scrape_log (account, tool, target, ok, error) values ('salesnav', 'linkedin_search_leads', $1, $2, $3)",
+        "options": {
+          "queryReplacement": "={{ [$('Config').item.json.company + ' / ' + $('Config').item.json.pass, !$json.error, $json.error ? String($json.error.message ?? $json.error) : null] }}"
+        }
+      },
+      "id": "2419ab44-3243-58f5-b0a4-ed08a5983f89",
+      "name": "Log searches",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        660,
+        300
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const leads = new Map();\nconst errors = [];\nfor (const item of $('Sales Navigator search').all()) {\n  if (item.json.error) { errors.push(String(item.json.error.message ?? item.json.error)); continue; }\n  const r = item.json.structuredContent ?? item.json.content?.find(c => c.type === 'text')?.text ?? item.json;\n  const res = typeof r === 'string' ? JSON.parse(r) : r;\n  for (const l of res.leads ?? []) if (l.salesNavUrl) leads.set(l.salesNavUrl, l);\n}\nconst cfg = $('Config').first().json;\nconst list = [...leads.values()];\nif (!list.length) return [{ json: { company: cfg.company, cin: cfg.cin, leads: [], errors } }];\nconst request = {\n  model: 'claude-sonnet-5-5', max_tokens: 8000,\n  tools: [{ name: 'rank_leads', description: 'Score each lead.', input_schema: { type: 'object', properties: {\n    leads: { type: 'array', items: { type: 'object', properties: {\n      salesNavUrl: { type: 'string' }, score: { type: 'integer', minimum: 0, maximum: 10 },\n      match_reason: { type: 'string' } }, required: ['salesNavUrl', 'score', 'match_reason'] } } },\n    required: ['leads'] } }],\n  tool_choice: { type: 'tool', name: 'rank_leads' },\n  messages: [{ role: 'user', content:\n    'We want to start a CSR partnership with ' + cfg.company + '. Score each Sales Navigator lead 0-10 for how likely ' +\n    'they own or strongly influence CSR spend at THIS company: CSR head / foundation head / sustainability or ESG head = 8-10; ' +\n    'CHRO or senior HR who may hold CSR = 6-8; junior or unrelated roles, or a different employer = 0-3. ' +\n    'Give a one-line match_reason.\\n\\n' + JSON.stringify(list) }] };\nreturn [{ json: { company: cfg.company, cin: cfg.cin, leads: list, errors, request } }];",
+        "mode": "runOnceForAllItems"
+      },
+      "id": "2207d3de-3326-5ac9-9afd-1869dc09c1d5",
+      "name": "Collect leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        880,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "b48ca468-b7d6-5939-b95b-0c6eff664b85",
+              "leftValue": "={{ $json.leads }}",
+              "rightValue": "",
+              "operator": {
+                "type": "array",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a4373211-7c09-5466-b758-50dc0a86498a",
+      "name": "Any leads?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { company: $json.company, leads: [], errors: $json.errors } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "fc1bb10b-e9b0-5071-9ca5-22f91d5da73a",
+      "name": "Respond no leads",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1320,
+        460
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropicApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "aa34426f-a262-5ed4-87c4-4e35ddca880a",
+      "name": "Claude: rank leads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        220
+      ],
+      "credentials": {
+        "anthropicApi": {
+          "id": "REPLACE_ME",
+          "name": "Anthropic"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const prev = $('Collect leads').first().json;\nconst toolUse = ($json.content ?? []).find(c => c.type === 'tool_use');\nif (!toolUse) throw new Error('Ranking returned nothing: ' + JSON.stringify($json).slice(0, 500));\nconst byUrl = new Map(toolUse.input.leads.map(x => [x.salesNavUrl, x]));\nconst ranked = prev.leads\n  .map(l => ({ ...l, ...(byUrl.get(l.salesNavUrl) ?? { score: 0, match_reason: 'not ranked' }) }))\n  .filter(l => l.score >= 5)\n  .sort((a, b) => b.score - a.score);\nreturn [{ json: { company: prev.company, cin: prev.cin, ranked, leadsJson: JSON.stringify(ranked), errors: prev.errors } }];"
+      },
+      "id": "1a7f79b4-faef-59ef-9b47-9b5d791f86ae",
+      "name": "Merge ranking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select linkedin.add_csr_leads($1, $2, $3::jsonb) as saved",
+        "options": {
+          "queryReplacement": "={{ [$json.company, $json.cin, $json.leadsJson] }}"
+        }
+      },
+      "id": "4a240201-85bd-5056-bff2-54cfcd7dc244",
+      "name": "Save leads",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1760,
+        220
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { company: $('Merge ranking').first().json.company, saved: $json.saved, leads: $('Merge ranking').first().json.ranked, errors: $('Merge ranking').first().json.errors } }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "47458271-0fda-54a9-881a-0f329a10473f",
+      "name": "Respond leads",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1980,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Sales Navigator search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sales Navigator search": {
+      "main": [
+        [
+          {
+            "node": "Log searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log searches": {
+      "main": [
+        [
+          {
+            "node": "Collect leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect leads": {
+      "main": [
+        [
+          {
+            "node": "Any leads?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Any leads?": {
+      "main": [
+        [
+          {
+            "node": "Claude: rank leads",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Respond no leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude: rank leads": {
+      "main": [
+        [
+          {
+            "node": "Merge ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge ranking": {
+      "main": [
+        [
+          {
+            "node": "Save leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save leads": {
+      "main": [
+        [
+          {
+            "node": "Respond leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

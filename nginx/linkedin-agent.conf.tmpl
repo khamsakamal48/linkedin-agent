@@ -1,0 +1,53 @@
+# Rendered by scripts/install-nginx.sh (envsubst). Do not edit the rendered copy.
+# TLS lines are added by certbot (--nginx).
+
+# Bearer token check for the MCP endpoints.
+map $http_authorization $li_mcp_authorized {
+    default                    0;
+    "Bearer ${MCP_BEARER_TOKEN}" 1;
+}
+
+# --- MCP endpoints for Claude (n8n uses the docker network directly) ---
+server {
+    listen 80;
+    server_name ${MCP_DOMAIN};
+
+    # Upstreams per account are written by install-nginx.sh
+    include ${REPO_DIR}/nginx/rendered/mcp-locations.conf;
+
+    location / { return 404; }
+}
+
+# --- LinkedIn login page for profile accounts (scripts/add-account.sh) ---
+server {
+    listen 80;
+    server_name ${LOGIN_DOMAIN};
+
+    auth_basic "LinkedIn account login";
+    auth_basic_user_file ${REPO_DIR}/nginx/.htpasswd-login;
+
+    location / {
+        proxy_pass http://127.0.0.1:6080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 1h;
+    }
+}
+
+# --- Sales Navigator browser (log in once, watch it work) ---
+server {
+    listen 80;
+    server_name ${SALESNAV_LOGIN_DOMAIN};
+
+    auth_basic "Sales Navigator browser";
+    auth_basic_user_file ${REPO_DIR}/nginx/.htpasswd-salesnav;
+
+    location / {
+        proxy_pass http://127.0.0.1:6081;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 1h;
+    }
+}

@@ -1,0 +1,6 @@
+.env
+data/
+accounts/*.env
+docker-compose.accounts.yml
+nginx/.htpasswd*
+nginx/rendered/
