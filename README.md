@@ -11,7 +11,7 @@ A self-hosted LinkedIn data layer for our research agents (n8n + Claude).
 ```
 Claude ── https://MCP_DOMAIN/<service>/mcp ── Nginx (TLS + bearer) ──┐
                                                                       ├── li-profile-<acct>  (one container per LinkedIn account, own proxy)
-n8n ───── http://<service>:<port>/mcp ── docker network "linkedin" ───┤
+n8n ───── http://<service>:<port>/mcp ── podman network "linkedin" ───┤
                                                                       └── li-salesnav        (Sales Navigator seat, own proxy)
 n8n ───── li-postgres:5432 (schema "linkedin")
 ```
@@ -24,16 +24,10 @@ Each LinkedIn account runs in its own container, with its own saved session and 
 
 ## 1. Prerequisites (AWS instance)
 
-- Fedora EC2 instance (the one that already runs n8n), at least 4 GB RAM. Each account's browser uses about 500 MB to 1 GB. Leave SELinux in enforcing mode; the steps below account for it.
-- Docker and Docker Compose v2 (`docker compose version`). If they are missing, install them from Docker's repository:
-  ```bash
-  sudo dnf -y install dnf-plugins-core
-  sudo dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo
-  sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
-  sudo systemctl enable --now docker
-  sudo usermod -aG docker $USER    # log out and back in
-  ```
-  On Fedora 40 and older, the repo command is `sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo`. Use Docker, not Podman: the scripts call `docker` and `docker compose`.
+- Fedora 44 or newer EC2 instance (the one that already runs n8n), at least 4 GB RAM. Each account's browser uses about 500 MB to 1 GB. Leave SELinux in enforcing mode; the steps below account for it.
+- Podman 5 or newer, with `podman-compose` so that `podman compose` works (`podman compose version`). The scripts call `podman` and `podman compose`.
+  - Run this stack as the same user as n8n's containers (rootless as that user, or rootful with `sudo`). Podman keeps networks per user, so n8n can only join the `linkedin` network from the same side.
+  - Containers come back after a reboot only if `podman-restart.service` is enabled for that user.
 - Nginx on the host, with certbot:
   ```bash
   sudo dnf -y install nginx certbot python3-certbot-nginx
@@ -59,13 +53,14 @@ sudo mkdir -p /opt/linkedin-agent && sudo chown $USER: /opt/linkedin-agent
 git clone git@github.com:khamsakamal48/linkedin-agent.git /opt/linkedin-agent
 cd /opt/linkedin-agent
 cp .env.example .env
-cp docker-compose.accounts.yml.example docker-compose.accounts.yml
 nano .env    # set PG_PASSWORD, MCP_BEARER_TOKEN (openssl rand -hex 32), the three domains
-docker compose up -d li-postgres          # creates the "linkedin" network and the DB (schema auto-loaded)
-docker compose exec li-postgres psql -U linkedin -c '\dt linkedin.*'   # should list 5 tables
+scripts/compose.sh up -d li-postgres          # creates the "linkedin" network and the DB (schema auto-loaded)
+scripts/compose.sh exec li-postgres psql -U linkedin -c '\dt linkedin.*'   # should list 5 tables
 ```
 
 > Clone into `/opt`, not your home directory. On Fedora, home directories are private (mode `700`, SELinux type `user_home_t`), so Nginx could not read the routes and password files that the scripts write under `nginx/`.
+
+> Run compose commands through `scripts/compose.sh` (for example `scripts/compose.sh ps`). It passes both compose files and `COMPOSE_PROFILES` from `.env` to `podman compose`.
 
 > The scripts are executable in git. If you copied the files some other way, run `chmod +x scripts/*.sh`.
 
@@ -115,8 +110,8 @@ Needs a LinkedIn account with an active **Sales Navigator** seat. See [docs/ACCO
 ```bash
 cp accounts/salesnav.env.example accounts/salesnav.env && nano accounts/salesnav.env   # PROXY_SERVER
 sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=salesnav/' .env
-mkdir -p data/salesnav && sudo chown 1000:1000 data/salesnav   # browser runs as uid 1000
-docker compose up -d --build li-salesnav
+mkdir -p data/salesnav && podman run --rm -v "$PWD/data/salesnav:/x:z" docker.io/library/postgres:17 chown 1000:1000 /x   # browser runs as container uid 1000
+scripts/compose.sh up -d --build li-salesnav
 scripts/salesnav-password.sh           # prints the page password for the owner
 ```
 
@@ -126,12 +121,13 @@ The owner opens `https://SALESNAV_LOGIN_DOMAIN/vnc.html`, logs in to Sales Navig
 
 **a. Put n8n on the `linkedin` network**, so it reaches the services by name. No traffic goes through Nginx.
 
-- n8n started with `docker run`:
+- n8n started with `podman run`:
   ```bash
-  docker network connect linkedin <n8n-container-name>
+  podman network connect linkedin <n8n-container-name>
   ```
-  This does not survive re-creating the container. Use the compose option below for a permanent setup.
-- n8n started with Docker Compose: add this to n8n's `docker-compose.yml`, then `docker compose up -d`:
+  This does not survive re-creating the container. Use one of the options below for a permanent setup.
+- n8n run as a Quadlet (systemd) unit: add `Network=linkedin` to the `[Container]` section of n8n's `.container` file, then `systemctl daemon-reload && systemctl restart n8n` (add `--user` for rootless).
+- n8n started with `podman compose`: add this to n8n's compose file, then `podman compose up -d`:
   ```yaml
   services:
     n8n:
@@ -142,7 +138,7 @@ The owner opens `https://SALESNAV_LOGIN_DOMAIN/vnc.html`, logs in to Sales Navig
   ```
 - n8n installed directly on the host (npm or systemd): skip this step and use `http://127.0.0.1:<port>/mcp` and `127.0.0.1:5433` below.
 
-Check from inside n8n: `docker exec <n8n-container> wget -S -O- http://li-profile-acct-a:8080/mcp 2>&1 | head -2` should show an `HTTP/1.1 4xx` line. Any HTTP status proves the network works; `bad address` means it does not.
+Check from inside n8n: `podman exec <n8n-container> wget -S -O- http://li-profile-acct-a:8080/mcp 2>&1 | head -2` should show an `HTTP/1.1 4xx` line. Any HTTP status proves the network works; `bad address` means it does not.
 
 **b. Create credentials in n8n** (Settings → Credentials):
 
@@ -234,7 +230,7 @@ If logouts repeat, work through this checklist:
 2. Is someone also using that account in their own browser or phone app *heavily* at the same time? Normal phone use is fine. Running a second automation is not.
 3. Is the `data/<acct>/` directory intact and owned by the container user? `add-account.sh` fixes ownership.
 4. Did volume spike? Look at `scrape_log` for the last 24 h.
-5. Upgrade the image. LinkedIn changes break scrapers. Bump `LI_PROFILE_IMAGE` in `.env` and run `docker compose up -d`.
+5. Upgrade the image. LinkedIn changes break scrapers. Bump `LI_PROFILE_IMAGE` in `.env` and run `scripts/compose.sh up -d`.
 
 **Upgrades.** Images are pinned: `LI_PROFILE_IMAGE` in `.env`, and `LSN_REF` (commit) in `salesnav/Dockerfile`. Test a new version on one account first.
 
@@ -250,6 +246,7 @@ accounts/                     per-account proxy settings (*.env gitignored)
 salesnav/                     Sales Navigator image: Chromium + noVNC + MCP server + HTTP gateway
 db/schema.sql                 tables + functions (upsert, cache, caps), auto-loaded on first start
 nginx/                        Nginx template; rendered output + password files are gitignored
+scripts/compose.sh            podman compose with both files + profiles from .env
 scripts/add-account.sh        add or re-login a profile account (owner gets a link)
 scripts/install-nginx.sh      render + install Nginx routes
 scripts/mcp-call.sh           call any MCP tool from the shell (debugging)

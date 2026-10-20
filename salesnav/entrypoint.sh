@@ -13,7 +13,7 @@ sleep 1
 PROXY_ARG=""
 [ -n "${PROXY_SERVER:-}" ] && PROXY_ARG="--proxy-server=${PROXY_SERVER}"
 
-# --no-sandbox: Chromium's sandbox needs privileges Docker does not grant by default.
+# --no-sandbox: Chromium's sandbox needs privileges Podman does not grant by default.
 chromium --no-sandbox --no-first-run --no-default-browser-check \
   --user-data-dir=/data/chrome \
   --remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 \

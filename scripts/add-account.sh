@@ -64,17 +64,17 @@ fi
 
 # The container user must own the session directory.
 mkdir -p "$datadir"
-docker run --rm --user root --entrypoint chown -v "$PWD/$datadir:/x:z" "$LI_PROFILE_IMAGE" -R pwuser:pwuser /x
+podman run --rm --user root --entrypoint chown -v "$PWD/$datadir:/x:z" "$LI_PROFILE_IMAGE" -R pwuser:pwuser /x
 
 # The running server and the login must not share the profile at the same time.
-docker compose stop "$svc" >/dev/null 2>&1 || true
-docker rm -f li-login >/dev/null 2>&1 || true
+bash scripts/compose.sh stop "$svc" >/dev/null 2>&1 || true
+podman rm -f li-login >/dev/null 2>&1 || true
 
 # Fresh one-time password for the login page (Nginx re-reads this file per request).
 pw=$(openssl rand -base64 12 | tr -d '/+=')
 printf 'owner:%s\n' "$(openssl passwd -apr1 "$pw")" > nginx/.htpasswd-login
 
-docker run -d --name li-login --env-file "$envf" \
+podman run -d --name li-login --env-file "$envf" \
   -v "$PWD/$datadir:/home/pwuser/.linkedin-mcp:z" \
   -p 127.0.0.1:6080:6080 --shm-size 1g \
   "$LI_PROFILE_IMAGE" --login --login-viewer >/dev/null
@@ -82,13 +82,13 @@ docker run -d --name li-login --env-file "$envf" \
 echo "Starting the login browser..."
 link=""
 for _ in $(seq 1 90); do
-  link=$(docker logs li-login 2>&1 | grep -o 'http://127.0.0.1:6080/vnc_lite.html[^[:space:]]*' | tail -1 || true)
+  link=$(podman logs li-login 2>&1 | grep -o 'http://127.0.0.1:6080/vnc_lite.html[^[:space:]]*' | tail -1 || true)
   [[ -n "$link" ]] && break
-  docker ps -q -f name=^li-login$ | grep -q . || break
+  podman ps -q -f name=^li-login$ | grep -q . || break
   sleep 2
 done
 if [[ -z "$link" ]]; then
-  echo "Login viewer did not start:"; docker logs li-login 2>&1 | tail -20; docker rm -f li-login >/dev/null; exit 1
+  echo "Login viewer did not start:"; podman logs li-login 2>&1 | tail -20; podman rm -f li-login >/dev/null; exit 1
 fi
 link=${link/http:\/\/127.0.0.1:6080/https://$LOGIN_DOMAIN}
 
@@ -107,19 +107,19 @@ The link works once and expires in 30 minutes.
 Waiting for the owner to finish (Ctrl+C is safe; re-run with --relogin)...
 EOF
 
-code=$(docker wait li-login)
-docker logs li-login 2>&1 | tail -5
-docker rm li-login >/dev/null
+code=$(podman wait li-login)
+podman logs li-login 2>&1 | tail -5
+podman rm li-login >/dev/null
 : > nginx/.htpasswd-login   # disable the login page again
 
 if [[ "$code" != 0 ]]; then
   echo "Login did not complete (exit $code). Re-run: scripts/add-account.sh $acct --relogin"; exit 1
 fi
 
-docker compose up -d "$svc"
+bash scripts/compose.sh up -d "$svc"
 
 # The login exits 0 even when it was abandoned, so prove the session with one real call.
-url="http://127.0.0.1:$(docker compose port "$svc" 8080 | cut -d: -f2)/mcp"
+url="http://127.0.0.1:$(bash scripts/compose.sh port "$svc" 8080 | cut -d: -f2)/mcp"
 for _ in $(seq 1 30); do curl -s -o /dev/null "$url" && break; sleep 2; done
 echo "Checking the session (opens the owner's own profile once)..."
 result=$(bash scripts/mcp-call.sh "$url" get_my_profile '{}' || true)

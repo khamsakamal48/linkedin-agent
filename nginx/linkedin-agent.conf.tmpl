@@ -7,7 +7,7 @@ map $http_authorization $li_mcp_authorized {
     "Bearer ${MCP_BEARER_TOKEN}" 1;
 }
 
-# --- MCP endpoints for Claude (n8n uses the docker network directly) ---
+# --- MCP endpoints for Claude (n8n uses the podman network directly) ---
 server {
     listen 80;
     server_name ${MCP_DOMAIN};

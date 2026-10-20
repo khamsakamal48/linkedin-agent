@@ -1,10 +1,10 @@
 # Base stack. LinkedIn profile accounts live in docker-compose.accounts.yml,
-# which scripts/add-account.sh writes; .env sets COMPOSE_FILE to load both.
+# which scripts/add-account.sh writes; scripts/compose.sh loads both.
 name: linkedin-agent
 
 services:
   li-postgres:
-    image: postgres:17
+    image: docker.io/library/postgres:17
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${PG_DB:-linkedin}

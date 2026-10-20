@@ -73,7 +73,7 @@ scripts/add-account.sh acct-a
 |---|---|
 | Script prints `Login viewer did not start` and some logs | Usually a proxy problem. Check the proxy: `curl -x http://user:pass@host:port https://api.ipify.org`. Fix `accounts/acct-a.env`, then run `scripts/add-account.sh acct-a --relogin`. |
 | Owner gets "401 Authorization Required" | Wrong password, or the login already finished or timed out. Run `--relogin` for a fresh link. |
-| Owner sees a black or grey screen | Wait 10 seconds and reload. If it persists, check `docker logs li-login`. |
+| Owner sees a black or grey screen | Wait 10 seconds and reload. If it persists, check `podman logs li-login`. |
 | `Login did not complete (exit …)` | The owner closed the tab before reaching the feed, or 30 minutes passed. Run `--relogin`. |
 | LinkedIn shows "Let's do a quick security check" / CAPTCHA | Normal for a new IP. The owner completes it in the same window. |
 | LinkedIn says the account is restricted | Stop using that account. Lower the caps. Ask the owner to resolve it on linkedin.com from their own device. |
@@ -95,7 +95,8 @@ Edit `accounts/acct-a.env`, then **run `--relogin`**. A session moved to a new I
 ## Removing an account
 
 ```bash
-docker compose rm -sf li-profile-acct-a
+scripts/compose.sh stop li-profile-acct-a
+podman rm -f $(podman ps -aq --filter label=com.docker.compose.service=li-profile-acct-a)
 # delete the li-profile-acct-a block from docker-compose.accounts.yml
 rm -rf data/acct-a accounts/acct-a.env      # deletes the stored session
 sudo scripts/install-nginx.sh
@@ -115,8 +116,8 @@ Steps:
 cp accounts/salesnav.env.example accounts/salesnav.env
 nano accounts/salesnav.env                    # PROXY_SERVER=http://host:port
 sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=salesnav/' .env
-mkdir -p data/salesnav && sudo chown 1000:1000 data/salesnav   # browser runs as uid 1000
-docker compose up -d --build li-salesnav      # first build takes a few minutes
+mkdir -p data/salesnav && podman run --rm -v "$PWD/data/salesnav:/x:z" docker.io/library/postgres:17 chown 1000:1000 /x   # browser runs as container uid 1000
+scripts/compose.sh up -d --build li-salesnav      # first build takes a few minutes
 scripts/salesnav-password.sh                  # prints username "owner" + a password
 ```
 

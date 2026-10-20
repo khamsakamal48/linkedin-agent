@@ -1,7 +1,7 @@
 # Sales Navigator MCP: a real Chromium on a virtual display (watchable / loggable-in
 # through noVNC), the globodai Sales Navigator server attached to it over CDP,
 # and supergateway exposing that stdio server as streamable HTTP on :8000.
-FROM node:22-bookworm-slim
+FROM docker.io/library/node:22-bookworm-slim
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
