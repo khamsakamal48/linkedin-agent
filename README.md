@@ -41,7 +41,7 @@ Each LinkedIn account runs in its own container, with its own saved session and 
 ## 2. Install
 
 ```bash
-git clone git@github.com:<you>/linkedin-agent.git ~/linkedin-agent
+git clone git@github.com:khamsakamal48/linkedin-agent.git ~/linkedin-agent
 cd ~/linkedin-agent
 cp .env.example .env
 cp docker-compose.accounts.yml.example docker-compose.accounts.yml
