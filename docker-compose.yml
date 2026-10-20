@@ -11,8 +11,8 @@ services:
       POSTGRES_USER: ${PG_USER:-linkedin}
       POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env}
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./data/postgres:/var/lib/postgresql/data:z   # :z relabels for SELinux (Fedora)
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro,z
     ports:
       - "127.0.0.1:5433:5432"
     networks: [linkedin]
@@ -34,7 +34,7 @@ services:
       LSN_DAILY_SEARCHES: ${SN_DAILY_SEARCHES:-30}
       LSN_DAILY_PROFILE_VIEWS: ${SN_DAILY_PROFILE_VIEWS:-80}
     volumes:
-      - ./data/salesnav:/data
+      - ./data/salesnav:/data:z
     ports:
       - "127.0.0.1:8100:8000"   # MCP (Nginx -> Claude)
       - "127.0.0.1:6081:6080"   # noVNC login/watch page (Nginx -> account owner)

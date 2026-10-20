@@ -31,7 +31,7 @@ Why this design:
 Pick a short name: lowercase letters, digits and dashes, for example `acct-a`, `priya`, `research-2`.
 
 ```bash
-cd ~/linkedin-agent
+cd /opt/linkedin-agent
 scripts/add-account.sh acct-a
 ```
 

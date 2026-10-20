@@ -24,10 +24,24 @@ Each LinkedIn account runs in its own container, with its own saved session and 
 
 ## 1. Prerequisites (AWS instance)
 
-- Ubuntu EC2 instance (the one that already runs n8n), at least 4 GB RAM. Each account's browser uses about 500 MB to 1 GB.
-- Docker and Docker Compose v2 (`docker compose version`).
-- Nginx on the host, with certbot (`sudo apt install nginx certbot python3-certbot-nginx`).
-- `git`, `openssl`, `envsubst` (`sudo apt install gettext-base`).
+- Fedora EC2 instance (the one that already runs n8n), at least 4 GB RAM. Each account's browser uses about 500 MB to 1 GB. Leave SELinux in enforcing mode; the steps below account for it.
+- Docker and Docker Compose v2 (`docker compose version`). If they are missing, install them from Docker's repository:
+  ```bash
+  sudo dnf -y install dnf-plugins-core
+  sudo dnf config-manager addrepo --from-repofile=https://download.docker.com/linux/fedora/docker-ce.repo
+  sudo dnf -y install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  sudo systemctl enable --now docker
+  sudo usermod -aG docker $USER    # log out and back in
+  ```
+  On Fedora 40 and older, the repo command is `sudo dnf config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo`. Use Docker, not Podman: the scripts call `docker` and `docker compose`.
+- Nginx on the host, with certbot:
+  ```bash
+  sudo dnf -y install nginx certbot python3-certbot-nginx
+  sudo systemctl enable --now nginx
+  ```
+  Fedora does not start Nginx after install, and SELinux stops it from proxying to local ports. `install-nginx.sh` turns on the `httpd_can_network_connect` SELinux boolean for you.
+- `git`, `openssl`, `envsubst` (`sudo dnf -y install git openssl /usr/bin/envsubst`).
+- If `firewalld` is running (`sudo firewall-cmd --state`), open HTTP and HTTPS: `sudo firewall-cmd --permanent --add-service={http,https} && sudo firewall-cmd --reload`. Fedora Cloud images on EC2 usually do not run it.
 - Three DNS **A records** pointing at the instance's public IP:
   - `MCP_DOMAIN` (for example `li-mcp.yourorg.com`): MCP endpoints for Claude
   - `LOGIN_DOMAIN` (for example `li-login.yourorg.com`): the page where account owners log in
@@ -41,14 +55,17 @@ Each LinkedIn account runs in its own container, with its own saved session and 
 ## 2. Install
 
 ```bash
-git clone git@github.com:khamsakamal48/linkedin-agent.git ~/linkedin-agent
-cd ~/linkedin-agent
+sudo mkdir -p /opt/linkedin-agent && sudo chown $USER: /opt/linkedin-agent
+git clone git@github.com:khamsakamal48/linkedin-agent.git /opt/linkedin-agent
+cd /opt/linkedin-agent
 cp .env.example .env
 cp docker-compose.accounts.yml.example docker-compose.accounts.yml
 nano .env    # set PG_PASSWORD, MCP_BEARER_TOKEN (openssl rand -hex 32), the three domains
 docker compose up -d li-postgres          # creates the "linkedin" network and the DB (schema auto-loaded)
 docker compose exec li-postgres psql -U linkedin -c '\dt linkedin.*'   # should list 5 tables
 ```
+
+> Clone into `/opt`, not your home directory. On Fedora, home directories are private (mode `700`, SELinux type `user_home_t`), so Nginx could not read the routes and password files that the scripts write under `nginx/`.
 
 > The scripts are executable in git. If you copied the files some other way, run `chmod +x scripts/*.sh`.
 

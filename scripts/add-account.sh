@@ -50,7 +50,7 @@ if [[ "$mode" == new ]]; then
       # n8n reaches this service by its compose name; Nginx rewrites Host to localhost.
       FASTMCP_HTTP_ALLOWED_HOSTS: '["$svc","$svc:8080","localhost","localhost:8080"]'
     volumes:
-      - ./$datadir:/home/pwuser/.linkedin-mcp
+      - ./$datadir:/home/pwuser/.linkedin-mcp:z
     ports:
       - "127.0.0.1:$port:8080"
     command: ["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8080", "--path", "/mcp"]
@@ -64,7 +64,7 @@ fi
 
 # The container user must own the session directory.
 mkdir -p "$datadir"
-docker run --rm --user root --entrypoint chown -v "$PWD/$datadir:/x" "$LI_PROFILE_IMAGE" -R pwuser:pwuser /x
+docker run --rm --user root --entrypoint chown -v "$PWD/$datadir:/x:z" "$LI_PROFILE_IMAGE" -R pwuser:pwuser /x
 
 # The running server and the login must not share the profile at the same time.
 docker compose stop "$svc" >/dev/null 2>&1 || true
@@ -75,7 +75,7 @@ pw=$(openssl rand -base64 12 | tr -d '/+=')
 printf 'owner:%s\n' "$(openssl passwd -apr1 "$pw")" > nginx/.htpasswd-login
 
 docker run -d --name li-login --env-file "$envf" \
-  -v "$PWD/$datadir:/home/pwuser/.linkedin-mcp" \
+  -v "$PWD/$datadir:/home/pwuser/.linkedin-mcp:z" \
   -p 127.0.0.1:6080:6080 --shm-size 1g \
   "$LI_PROFILE_IMAGE" --login --login-viewer >/dev/null
 

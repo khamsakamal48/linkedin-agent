@@ -41,5 +41,7 @@ vars='${MCP_BEARER_TOKEN} ${MCP_DOMAIN} ${LOGIN_DOMAIN} ${SALESNAV_LOGIN_DOMAIN}
 envsubst "$vars" < nginx/linkedin-agent.conf.tmpl > nginx/rendered/linkedin-agent.conf
 
 ln -sf "$REPO_DIR/nginx/rendered/linkedin-agent.conf" /etc/nginx/conf.d/linkedin-agent.conf
+# SELinux (Fedora) blocks Nginx from proxying to 127.0.0.1:<port> unless this is on.
+if command -v selinuxenabled >/dev/null && selinuxenabled; then setsebool -P httpd_can_network_connect 1; fi
 nginx -t && systemctl reload nginx
 echo "Nginx routes:"; grep -o 'location /[^ ]*' nginx/rendered/mcp-locations.conf
