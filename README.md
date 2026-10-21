@@ -13,7 +13,7 @@ Claude ── https://MCP_DOMAIN/<service>/mcp ── Nginx (TLS + bearer) ─�
                                                                       ├── li-profile-<acct>  (one container per LinkedIn account, own proxy)
 n8n ───── http://<service>:<port>/mcp ── podman network "n8n-net" ────┤
                                                                       └── li-salesnav        (Sales Navigator seat, own proxy)
-n8n ───── existing n8n Postgres on "n8n-net" (database "linkedin", schema "linkedin")
+n8n ───── existing n8n Postgres on "n8n-net" (database PG_DB, schema "linkedin")
 ```
 
 Each LinkedIn account runs in its own container, with its own saved session and its own sticky proxy. Add accounts to add capacity.
@@ -56,22 +56,23 @@ cp .env.example .env
 nano .env    # set PG_PASSWORD, MCP_BEARER_TOKEN (openssl rand -hex 32), the three domains
 ```
 
-The stack has no Postgres of its own. It uses the Postgres that n8n already runs, in a separate `linkedin` database, and joins n8n's `n8n-net` network. Find the Postgres container and its admin user (the `POSTGRES_USER` it was started with), then create the database and load the schema:
+The stack has no Postgres of its own. It uses the Postgres that n8n already runs, in a separate database (`PG_DB`, owned by `PG_USER`, both from `.env`), and joins n8n's `n8n-net` network. Find the Postgres container and its admin user (the `POSTGRES_USER` it was started with), then create the database and load the schema:
 
 ```bash
 podman network ls | grep n8n-net        # must exist; the stack refuses to start without it
 podman ps --filter network=n8n-net      # note the Postgres container name, e.g. n8n-postgres
 PG=n8n-postgres; PG_ADMIN=n8n           # <- your container name and admin user
 set -a; . ./.env; set +a
-podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U "$PG_ADMIN" -d postgres -v pw="$PG_PASSWORD" <<'SQL'
-create role linkedin login password :'pw';
-create database linkedin owner linkedin;
+podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U "$PG_ADMIN" -d postgres \
+  -v user="$PG_USER" -v pw="$PG_PASSWORD" -v db="$PG_DB" <<'SQL'
+create role :"user" login password :'pw';
+create database :"db" owner :"user";
 SQL
-podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U linkedin -d linkedin < db/schema.sql
-podman exec "$PG" psql -U linkedin -d linkedin -c '\dt linkedin.*'   # should list 5 tables
+podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U "$PG_USER" -d "$PG_DB" < db/schema.sql
+podman exec "$PG" psql -U "$PG_USER" -d "$PG_DB" -c '\dt linkedin.*'   # should list 5 tables
 ```
 
-If you change `PG_DB` or `PG_USER` in `.env`, use those names instead of `linkedin` above. `db/schema.sql` is idempotent, so re-running the last two commands is safe.
+If `PG_USER` already exists in that Postgres, drop the `create role` line. `db/schema.sql` is idempotent, so re-running the last two commands is safe. The tables always land in the `linkedin` schema, whatever `PG_DB` is called.
 
 > Clone into `/opt`, not your home directory. On Fedora, home directories are private (mode `700`, SELinux type `user_home_t`), so Nginx could not read the routes and password files that the scripts write under `nginx/`.
 
@@ -232,7 +233,7 @@ If logouts repeat, work through this checklist:
 
 **Upgrades.** Images are pinned: `LI_PROFILE_IMAGE` in `.env`, and `LSN_REF` (commit) in `salesnav/Dockerfile`. Test a new version on one account first.
 
-**Backups.** Run `podman exec <postgres-container> pg_dump -U linkedin linkedin > linkedin.sql`, or include the `linkedin` database in n8n's Postgres backups. The `data/<acct>/` directories only hold sessions and can be recreated by logging in again.
+**Backups.** Run `podman exec <postgres-container> pg_dump -U <PG_USER> <PG_DB> > linkedin.sql`, or include the `PG_DB` database in n8n's Postgres backups. The `data/<acct>/` directories only hold sessions and can be recreated by logging in again.
 
 ## Repo layout
 
