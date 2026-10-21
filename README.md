@@ -11,9 +11,9 @@ A self-hosted LinkedIn data layer for our research agents (n8n + Claude).
 ```
 Claude ── https://MCP_DOMAIN/<service>/mcp ── Nginx (TLS + bearer) ──┐
                                                                       ├── li-profile-<acct>  (one container per LinkedIn account, own proxy)
-n8n ───── http://<service>:<port>/mcp ── podman network "linkedin" ───┤
+n8n ───── http://<service>:<port>/mcp ── podman network "n8n_net" ────┤
                                                                       └── li-salesnav        (Sales Navigator seat, own proxy)
-n8n ───── li-postgres:5432 (schema "linkedin")
+n8n ───── existing n8n Postgres on "n8n_net" (database "linkedin", schema "linkedin")
 ```
 
 Each LinkedIn account runs in its own container, with its own saved session and its own sticky proxy. Add accounts to add capacity.
@@ -26,7 +26,7 @@ Each LinkedIn account runs in its own container, with its own saved session and 
 
 - Fedora 44 or newer EC2 instance (the one that already runs n8n), at least 4 GB RAM. Each account's browser uses about 500 MB to 1 GB. Leave SELinux in enforcing mode; the steps below account for it.
 - Podman 5 or newer, with `podman-compose` so that `podman compose` works (`podman compose version`). The scripts call `podman` and `podman compose`.
-  - Run this stack as the same user as n8n's containers (rootless as that user, or rootful with `sudo`). Podman keeps networks per user, so n8n can only join the `linkedin` network from the same side.
+  - Run this stack as the same user as n8n's containers (rootless as that user, or rootful with `sudo`). Podman keeps networks per user, so this stack can only join n8n's `n8n_net` network from the same side.
   - Containers come back after a reboot only if `podman-restart.service` is enabled for that user.
 - Nginx on the host, with certbot:
   ```bash
@@ -40,7 +40,7 @@ Each LinkedIn account runs in its own container, with its own saved session and 
   - `MCP_DOMAIN` (for example `li-mcp.yourorg.com`): MCP endpoints for Claude
   - `LOGIN_DOMAIN` (for example `li-login.yourorg.com`): the page where account owners log in
   - `SALESNAV_LOGIN_DOMAIN` (for example `sn-login.yourorg.com`): the Sales Navigator browser page
-- Security group: allow inbound 80 and 443. **Do not** open 5433, 6080, 6081, 8100 or 82xx. They bind to `127.0.0.1` only.
+- Security group: allow inbound 80 and 443. **Do not** open 6080, 6081, 8100 or 82xx. They bind to `127.0.0.1` only.
 - One **sticky residential/ISP proxy per LinkedIn account** (for example Bright Data, Oxylabs, IPRoyal or Smartproxy). Ask for a "sticky session" that keeps one IP for days, never per-request rotation.
   - Profile accounts accept `user:password` proxies.
   - The Sales Navigator browser needs an **IP-whitelisted** proxy endpoint: whitelist the EC2 public IP at the provider.
@@ -54,9 +54,24 @@ git clone git@github.com:khamsakamal48/linkedin-agent.git /opt/linkedin-agent
 cd /opt/linkedin-agent
 cp .env.example .env
 nano .env    # set PG_PASSWORD, MCP_BEARER_TOKEN (openssl rand -hex 32), the three domains
-scripts/compose.sh up -d li-postgres          # creates the "linkedin" network and the DB (schema auto-loaded)
-scripts/compose.sh exec li-postgres psql -U linkedin -c '\dt linkedin.*'   # should list 5 tables
 ```
+
+The stack has no Postgres of its own. It uses the Postgres that n8n already runs, in a separate `linkedin` database, and joins n8n's `n8n_net` network. Find the Postgres container and its admin user (the `POSTGRES_USER` it was started with), then create the database and load the schema:
+
+```bash
+podman network ls | grep n8n_net        # must exist; the stack refuses to start without it
+podman ps --filter network=n8n_net      # note the Postgres container name, e.g. n8n-postgres
+PG=n8n-postgres; PG_ADMIN=n8n           # <- your container name and admin user
+set -a; . ./.env; set +a
+podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U "$PG_ADMIN" -d postgres -v pw="$PG_PASSWORD" <<'SQL'
+create role linkedin login password :'pw';
+create database linkedin owner linkedin;
+SQL
+podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U linkedin -d linkedin < db/schema.sql
+podman exec "$PG" psql -U linkedin -d linkedin -c '\dt linkedin.*'   # should list 5 tables
+```
+
+If you change `PG_DB` or `PG_USER` in `.env`, use those names instead of `linkedin` above. `db/schema.sql` is idempotent, so re-running the last two commands is safe.
 
 > Clone into `/opt`, not your home directory. On Fedora, home directories are private (mode `700`, SELinux type `user_home_t`), so Nginx could not read the routes and password files that the scripts write under `nginx/`.
 
@@ -119,24 +134,7 @@ The owner opens `https://SALESNAV_LOGIN_DOMAIN/vnc.html`, logs in to Sales Navig
 
 ## 6. Connect n8n (same AWS instance)
 
-**a. Put n8n on the `linkedin` network**, so it reaches the services by name. No traffic goes through Nginx.
-
-- n8n started with `podman run`:
-  ```bash
-  podman network connect linkedin <n8n-container-name>
-  ```
-  This does not survive re-creating the container. Use one of the options below for a permanent setup.
-- n8n run as a Quadlet (systemd) unit: add `Network=linkedin` to the `[Container]` section of n8n's `.container` file, then `systemctl daemon-reload && systemctl restart n8n` (add `--user` for rootless).
-- n8n started with `podman compose`: add this to n8n's compose file, then `podman compose up -d`:
-  ```yaml
-  services:
-    n8n:
-      networks: [default, linkedin]
-  networks:
-    linkedin:
-      external: true
-  ```
-- n8n installed directly on the host (npm or systemd): skip this step and use `http://127.0.0.1:<port>/mcp` and `127.0.0.1:5433` below.
+**a. Network.** Nothing to do: the MCP services join n8n's `n8n_net`, so n8n reaches them by name. No traffic goes through Nginx.
 
 Check from inside n8n: `podman exec <n8n-container> wget -S -O- http://li-profile-acct-a:8080/mcp 2>&1 | head -2` should show an `HTTP/1.1 4xx` line. Any HTTP status proves the network works; `bad address` means it does not.
 
@@ -144,7 +142,7 @@ Check from inside n8n: `podman exec <n8n-container> wget -S -O- http://li-profil
 
 | Credential | Type | Values |
 |---|---|---|
-| `LinkedIn Postgres` | Postgres | Host `li-postgres`, Port `5432`, Database/User/Password from `.env` (`PG_DB`, `PG_USER`, `PG_PASSWORD`), SSL off |
+| `LinkedIn Postgres` | Postgres | Host: n8n's Postgres name on `n8n_net` (the same host n8n's own DB uses, e.g. `n8n-postgres`), Port `5432`, Database/User/Password from `.env` (`PG_DB`, `PG_USER`, `PG_PASSWORD`), SSL off |
 | `Anthropic` | Anthropic API | your Anthropic API key |
 | `SMTP` | SMTP | for health alerts (or swap the "Alert admin" node for Gmail or Slack) |
 
@@ -234,17 +232,17 @@ If logouts repeat, work through this checklist:
 
 **Upgrades.** Images are pinned: `LI_PROFILE_IMAGE` in `.env`, and `LSN_REF` (commit) in `salesnav/Dockerfile`. Test a new version on one account first.
 
-**Backups.** Back up `data/postgres` (or run `pg_dump`). The `data/<acct>/` directories only hold sessions and can be recreated by logging in again.
+**Backups.** Run `podman exec <postgres-container> pg_dump -U linkedin linkedin > linkedin.sql`, or include the `linkedin` database in n8n's Postgres backups. The `data/<acct>/` directories only hold sessions and can be recreated by logging in again.
 
 ## Repo layout
 
 ```
-docker-compose.yml            base stack: postgres, Sales Navigator
+docker-compose.yml            base stack: Sales Navigator, joins n8n_net
 docker-compose.accounts.yml   per-account profile services (written by add-account.sh, gitignored)
 .env.example                  settings; copy to .env
 accounts/                     per-account proxy settings (*.env gitignored)
 salesnav/                     Sales Navigator image: Chromium + noVNC + MCP server + HTTP gateway
-db/schema.sql                 tables + functions (upsert, cache, caps), auto-loaded on first start
+db/schema.sql                 tables + functions (upsert, cache, caps), loaded into n8n's Postgres in step 2
 nginx/                        Nginx template; rendered output + password files are gitignored
 scripts/compose.sh            podman compose with both files + profiles from .env
 scripts/add-account.sh        add or re-login a profile account (owner gets a link)

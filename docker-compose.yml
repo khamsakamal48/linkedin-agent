@@ -1,26 +1,9 @@
 # Base stack. LinkedIn profile accounts live in docker-compose.accounts.yml,
 # which scripts/add-account.sh writes; scripts/compose.sh loads both.
+# Postgres is not here: the data lives in the Postgres that n8n already runs (see README step 2).
 name: linkedin-agent
 
 services:
-  li-postgres:
-    image: docker.io/library/postgres:17
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: ${PG_DB:-linkedin}
-      POSTGRES_USER: ${PG_USER:-linkedin}
-      POSTGRES_PASSWORD: ${PG_PASSWORD:?set PG_PASSWORD in .env}
-    volumes:
-      - ./data/postgres:/var/lib/postgresql/data:z   # :z relabels for SELinux (Fedora)
-      - ./db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro,z
-    ports:
-      - "127.0.0.1:5433:5432"
-    networks: [linkedin]
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
-      retries: 5
-
   # Sales Navigator: one account with a Sales Navigator seat.
   # The account owner logs in through the noVNC page (see docs/ACCOUNT-SETUP.md).
   li-salesnav:
@@ -42,6 +25,8 @@ services:
     networks: [linkedin]
     profiles: [salesnav]
 
+# Join n8n's existing network, so n8n reaches the MCP services by name.
 networks:
   linkedin:
-    name: linkedin
+    name: n8n_net
+    external: true

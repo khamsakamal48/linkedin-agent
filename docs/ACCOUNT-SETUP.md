@@ -22,7 +22,7 @@ Why this design:
 
 ## Before the first account (once)
 
-1. Finish README steps 1–2 (install, `.env`, Postgres).
+1. Finish README steps 1–2 (install, `.env`, database in n8n's Postgres).
 2. Run `sudo scripts/install-nginx.sh` and `sudo certbot --nginx -d <MCP_DOMAIN> -d <LOGIN_DOMAIN> -d <SALESNAV_LOGIN_DOMAIN>`.
 3. Open `https://<LOGIN_DOMAIN>/` in a browser. It should ask for a password and reject every attempt. That is correct: no login is running.
 
