@@ -11,9 +11,9 @@ A self-hosted LinkedIn data layer for our research agents (n8n + Claude).
 ```
 Claude ── https://MCP_DOMAIN/<service>/mcp ── Nginx (TLS + bearer) ──┐
                                                                       ├── li-profile-<acct>  (one container per LinkedIn account, own proxy)
-n8n ───── http://<service>:<port>/mcp ── podman network "n8n-net" ────┤
+n8n ───── http://<service>:<port>/mcp ── podman network "n8n-production_n8n-net" ┤
                                                                       └── li-salesnav        (Sales Navigator seat, own proxy)
-n8n ───── existing n8n Postgres on "n8n-net" (database PG_DB, schema "linkedin")
+n8n ───── existing n8n Postgres on "n8n-production_n8n-net" (database PG_DB, schema "linkedin")
 ```
 
 Each LinkedIn account runs in its own container, with its own saved session and its own sticky proxy. Add accounts to add capacity.
@@ -26,7 +26,7 @@ Each LinkedIn account runs in its own container, with its own saved session and 
 
 - Fedora 44 or newer EC2 instance (the one that already runs n8n), at least 4 GB RAM. Each account's browser uses about 500 MB to 1 GB. Leave SELinux in enforcing mode; the steps below account for it.
 - Podman 5 or newer, with `podman-compose` so that `podman compose` works (`podman compose version`). The scripts call `podman` and `podman compose`.
-  - Run this stack as the same user as n8n's containers (rootless as that user, or rootful with `sudo`). Podman keeps networks per user, so this stack can only join n8n's `n8n-net` network from the same side.
+  - Run this stack as the same user as n8n's containers (rootless as that user, or rootful with `sudo`). Podman keeps containers and networks per user, so this stack can only join n8n's `n8n-production_n8n-net` network from the same side. On our server n8n runs rootful, so run every `podman` and `scripts/*.sh` command in this guide with `sudo` (or from a `sudo -i` shell).
   - Containers come back after a reboot only if `podman-restart.service` is enabled for that user.
 - Nginx on the host, with certbot:
   ```bash
@@ -56,20 +56,20 @@ cp .env.example .env
 nano .env    # set PG_PASSWORD, MCP_BEARER_TOKEN (openssl rand -hex 32), the three domains
 ```
 
-The stack has no Postgres of its own. It uses the Postgres that n8n already runs, in a separate database (`PG_DB`, owned by `PG_USER`, both from `.env`), and joins n8n's `n8n-net` network. Find the Postgres container and its admin user (the `POSTGRES_USER` it was started with), then create the database and load the schema:
+The stack has no Postgres of its own. It uses the Postgres that n8n already runs, in a separate database (`PG_DB`, owned by `PG_USER`, both from `.env`), and joins n8n's `n8n-production_n8n-net` network. Find the Postgres container and its admin user (the `POSTGRES_USER` it was started with), then create the database and load the schema:
 
 ```bash
-podman network ls | grep n8n-net        # must exist; the stack refuses to start without it
-podman ps --filter network=n8n-net      # note the Postgres container name, e.g. n8n-postgres
-PG=n8n-postgres; PG_ADMIN=n8n           # <- your container name and admin user
+sudo podman network ls | grep n8n-production_n8n-net     # must exist; the stack refuses to start without it
+sudo podman ps --filter network=n8n-production_n8n-net   # note the Postgres container name: n8n-postgres
+PG=n8n-postgres; PG_ADMIN=CHANGE_ME     # <- set to DB_USER from n8n's own .env
 set -a; . ./.env; set +a
-podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U "$PG_ADMIN" -d postgres \
+sudo podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U "$PG_ADMIN" -d postgres \
   -v user="$PG_USER" -v pw="$PG_PASSWORD" -v db="$PG_DB" <<'SQL'
 create role :"user" login password :'pw';
 create database :"db" owner :"user";
 SQL
-podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U "$PG_USER" -d "$PG_DB" < db/schema.sql
-podman exec "$PG" psql -U "$PG_USER" -d "$PG_DB" -c '\dt linkedin.*'   # should list 5 tables
+sudo podman exec -i "$PG" psql -v ON_ERROR_STOP=1 -U "$PG_USER" -d "$PG_DB" < db/schema.sql
+sudo podman exec "$PG" psql -U "$PG_USER" -d "$PG_DB" -c '\dt linkedin.*'   # should list 5 tables
 ```
 
 If `PG_USER` already exists in that Postgres, drop the `create role` line. `db/schema.sql` is idempotent, so re-running the last two commands is safe. The tables always land in the `linkedin` schema, whatever `PG_DB` is called.
@@ -135,7 +135,7 @@ The owner opens `https://SALESNAV_LOGIN_DOMAIN/vnc.html`, logs in to Sales Navig
 
 ## 6. Connect n8n (same AWS instance)
 
-**a. Network.** Nothing to do: the MCP services join n8n's `n8n-net`, so n8n reaches them by name. No traffic goes through Nginx.
+**a. Network.** Nothing to do: the MCP services join n8n's `n8n-production_n8n-net`, so n8n reaches them by name. No traffic goes through Nginx.
 
 Check from inside n8n: `podman exec <n8n-container> wget -S -O- http://li-profile-acct-a:8080/mcp 2>&1 | head -2` should show an `HTTP/1.1 4xx` line. Any HTTP status proves the network works; `bad address` means it does not.
 
@@ -143,7 +143,7 @@ Check from inside n8n: `podman exec <n8n-container> wget -S -O- http://li-profil
 
 | Credential | Type | Values |
 |---|---|---|
-| `LinkedIn Postgres` | Postgres | Host: n8n's Postgres name on `n8n-net` (the same host n8n's own DB uses, e.g. `n8n-postgres`), Port `5432`, Database/User/Password from `.env` (`PG_DB`, `PG_USER`, `PG_PASSWORD`), SSL off |
+| `LinkedIn Postgres` | Postgres | Host: n8n's Postgres name on `n8n-production_n8n-net` (the same host n8n's own DB uses, e.g. `n8n-postgres`), Port `5432`, Database/User/Password from `.env` (`PG_DB`, `PG_USER`, `PG_PASSWORD`), SSL off |
 | `Anthropic` | Anthropic API | your Anthropic API key |
 | `SMTP` | SMTP | for health alerts (or swap the "Alert admin" node for Gmail or Slack) |
 
@@ -238,7 +238,7 @@ If logouts repeat, work through this checklist:
 ## Repo layout
 
 ```
-docker-compose.yml            base stack: Sales Navigator, joins n8n-net
+docker-compose.yml            base stack: Sales Navigator, joins n8n-production_n8n-net
 docker-compose.accounts.yml   per-account profile services (written by add-account.sh, gitignored)
 .env.example                  settings; copy to .env
 accounts/                     per-account proxy settings (*.env gitignored)
