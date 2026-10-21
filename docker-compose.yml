@@ -28,5 +28,5 @@ services:
 # Join n8n's existing network, so n8n reaches the MCP services by name.
 networks:
   linkedin:
-    name: n8n_net
+    name: n8n-net
     external: true
