@@ -14,10 +14,11 @@ touch nginx/.htpasswd-login          # empty = login page refuses everyone
 [[ -f nginx/.htpasswd-salesnav ]] || touch nginx/.htpasswd-salesnav
 
 # One location per published MCP port: profile accounts + Sales Navigator.
+# Bearer check is an inline if, not a map: as a map key the 71-char token overflows nginx's default map_hash_bucket_size.
 loc() {  # loc <url-prefix> <host-port>
   cat <<LOC
 location /$1/mcp {
-    if (\$li_mcp_authorized = 0) { return 401; }
+    if (\$http_authorization != "Bearer $MCP_BEARER_TOKEN") { return 401; }
     proxy_pass http://127.0.0.1:$2/mcp;
     proxy_http_version 1.1;
     proxy_set_header Host localhost;
@@ -37,11 +38,12 @@ LOC
   loc li-salesnav 8100
 } > nginx/rendered/mcp-locations.conf
 
-vars='${MCP_BEARER_TOKEN} ${MCP_DOMAIN} ${LOGIN_DOMAIN} ${SALESNAV_LOGIN_DOMAIN} ${REPO_DIR}'
+vars='${MCP_DOMAIN} ${LOGIN_DOMAIN} ${SALESNAV_LOGIN_DOMAIN} ${REPO_DIR}'
 envsubst "$vars" < nginx/linkedin-agent.conf.tmpl > nginx/rendered/linkedin-agent.conf
 
 ln -sf "$REPO_DIR/nginx/rendered/linkedin-agent.conf" /etc/nginx/conf.d/linkedin-agent.conf
 # SELinux (Fedora) blocks Nginx from proxying to 127.0.0.1:<port> unless this is on.
 if command -v selinuxenabled >/dev/null && selinuxenabled; then setsebool -P httpd_can_network_connect 1; fi
-nginx -t && systemctl reload nginx
+nginx -t
+systemctl reload nginx
 echo "Nginx routes:"; grep -o 'location /[^ ]*' nginx/rendered/mcp-locations.conf
