@@ -26,7 +26,7 @@ Each LinkedIn account runs in its own container, with its own saved session and 
 
 - Fedora 44 or newer EC2 instance (the one that already runs n8n), at least 4 GB RAM. Each account's browser uses about 500 MB to 1 GB. Leave SELinux in enforcing mode; the steps below account for it.
 - Podman 5 or newer, with `podman-compose` so that `podman compose` works (`podman compose version`). The scripts call `podman` and `podman compose`.
-  - Run this stack as the same user as n8n's containers (rootless as that user, or rootful with `sudo`). Podman keeps containers and networks per user, so this stack can only join n8n's `n8n-production_n8n-net` network from the same side. On our server n8n runs rootful, so run every `podman` and `scripts/*.sh` command in this guide with `sudo` (or from a `sudo -i` shell).
+  - Run this stack as the same user as n8n's containers (rootless as that user, or rootful with `sudo`). Podman keeps containers and networks per user, so this stack can only join n8n's `n8n-production_n8n-net` network from the same side. On our server n8n runs rootful, so run every `podman` command and every script except `scripts/mcp-call.sh` with `sudo`. `git`, editing `.env` and `mcp-call.sh` need no `sudo`.
   - Containers come back after a reboot only if `podman-restart.service` is enabled for that user.
 - Nginx on the host, with certbot:
   ```bash
@@ -76,7 +76,7 @@ If `PG_USER` already exists in that Postgres, drop the `create role` line. `db/s
 
 > Clone into `/opt`, not your home directory. On Fedora, home directories are private (mode `700`, SELinux type `user_home_t`), so Nginx could not read the routes and password files that the scripts write under `nginx/`.
 
-> Run compose commands through `scripts/compose.sh` (for example `scripts/compose.sh ps`). It passes both compose files and `COMPOSE_PROFILES` from `.env` to `podman compose`.
+> Run compose commands through `scripts/compose.sh` (for example `sudo scripts/compose.sh ps`). It passes both compose files and `COMPOSE_PROFILES` from `.env` to `podman compose`.
 
 > The scripts are executable in git. If you copied the files some other way, run `chmod +x scripts/*.sh`.
 
@@ -85,7 +85,7 @@ If `PG_USER` already exists in that Postgres, drop the `create role` line. `db/s
 The full walkthrough, with what the owner sees, is in **[docs/ACCOUNT-SETUP.md](docs/ACCOUNT-SETUP.md)**. In short:
 
 ```bash
-scripts/add-account.sh acct-a          # asks for the proxy, prints a link + password
+sudo scripts/add-account.sh acct-a          # asks for the proxy, prints a link + password
 sudo scripts/install-nginx.sh          # (first time / after adding an account) publishes the routes
 ```
 
@@ -114,7 +114,7 @@ Routes:
 | `https://MCP_DOMAIN/li-profile-<acct>/mcp` | profile server of that account | `Authorization: Bearer $MCP_BEARER_TOKEN` |
 | `https://MCP_DOMAIN/li-salesnav/mcp` | Sales Navigator server | same bearer token |
 | `https://LOGIN_DOMAIN/` | login browser (only while `add-account.sh` is waiting) | one-time password printed by the script |
-| `https://SALESNAV_LOGIN_DOMAIN/` | Sales Navigator browser | password from `scripts/salesnav-password.sh` |
+| `https://SALESNAV_LOGIN_DOMAIN/` | Sales Navigator browser | password from `sudo scripts/salesnav-password.sh` |
 
 Check: `curl -s -o /dev/null -w '%{http_code}\n' https://li-mcp.yourorg.com/li-profile-acct-a/mcp` should print `401`, and
 `MCP_TOKEN=<token> scripts/mcp-call.sh https://li-mcp.yourorg.com/li-profile-acct-a/mcp tools/list` should list the tools.
@@ -126,9 +126,9 @@ Needs a LinkedIn account with an active **Sales Navigator** seat. See [docs/ACCO
 ```bash
 cp accounts/salesnav.env.example accounts/salesnav.env && nano accounts/salesnav.env   # PROXY_SERVER
 sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=salesnav/' .env
-mkdir -p data/salesnav && podman run --rm -v "$PWD/data/salesnav:/x:z" docker.io/library/postgres:17 chown 1000:1000 /x   # browser runs as container uid 1000
-scripts/compose.sh up -d --build li-salesnav
-scripts/salesnav-password.sh           # prints the page password for the owner
+mkdir -p data/salesnav && sudo podman run --rm -v "$PWD/data/salesnav:/x:z" docker.io/library/postgres:17 chown 1000:1000 /x   # browser runs as container uid 1000
+sudo scripts/compose.sh up -d --build li-salesnav
+sudo scripts/salesnav-password.sh           # prints the page password for the owner
 ```
 
 The owner opens `https://SALESNAV_LOGIN_DOMAIN/vnc.html`, logs in to Sales Navigator once in the browser shown, and closes the tab. The browser keeps running, and the MCP server drives that same logged-in browser.
@@ -137,7 +137,7 @@ The owner opens `https://SALESNAV_LOGIN_DOMAIN/vnc.html`, logs in to Sales Navig
 
 **a. Network.** Nothing to do: the MCP services join n8n's `n8n-production_n8n-net`, so n8n reaches them by name. No traffic goes through Nginx.
 
-Check from inside n8n: `podman exec <n8n-container> wget -S -O- http://li-profile-acct-a:8080/mcp 2>&1 | head -2` should show an `HTTP/1.1 4xx` line. Any HTTP status proves the network works; `bad address` means it does not.
+Check from inside n8n: `sudo podman exec <n8n-container> wget -S -O- http://li-profile-acct-a:8080/mcp 2>&1 | head -2` should show an `HTTP/1.1 4xx` line. Any HTTP status proves the network works; `bad address` means it does not.
 
 **b. Create credentials in n8n** (Settings → Credentials):
 
@@ -215,13 +215,13 @@ Tables: `person` (one row per profile, plus the `raw` scraped text), `employment
 
 Warm up new accounts: about 20/day in week 1, then raise the cap gradually.
 
-**Adding capacity.** Run `scripts/add-account.sh acct-b` and then `sudo scripts/install-nginx.sh`. In n8n, duplicate the ingest workflow, change the webhook path and the Config node (`acct-b`, `http://li-profile-acct-b:8080/mcp`), and add the account to the health workflow's Accounts list.
+**Adding capacity.** Run `sudo scripts/add-account.sh acct-b` and then `sudo scripts/install-nginx.sh`. In n8n, duplicate the ingest workflow, change the webhook path and the Config node (`acct-b`, `http://li-profile-acct-b:8080/mcp`), and add the account to the health workflow's Accounts list.
 *(shortcut: one workflow per account. When there are more than about 3 accounts, add round-robin selection in a shared Config.)*
 
 **Logged out?** The health workflow emails you the fix. To do it by hand:
 
 ```bash
-scripts/add-account.sh acct-a --relogin    # new link + password for the owner
+sudo scripts/add-account.sh acct-a --relogin    # new link + password for the owner
 ```
 
 If logouts repeat, work through this checklist:
@@ -229,11 +229,11 @@ If logouts repeat, work through this checklist:
 2. Is someone also using that account in their own browser or phone app *heavily* at the same time? Normal phone use is fine. Running a second automation is not.
 3. Is the `data/<acct>/` directory intact and owned by the container user? `add-account.sh` fixes ownership.
 4. Did volume spike? Look at `scrape_log` for the last 24 h.
-5. Upgrade the image. LinkedIn changes break scrapers. Bump `LI_PROFILE_IMAGE` in `.env` and run `scripts/compose.sh up -d`.
+5. Upgrade the image. LinkedIn changes break scrapers. Bump `LI_PROFILE_IMAGE` in `.env` and run `sudo scripts/compose.sh up -d`.
 
 **Upgrades.** Images are pinned: `LI_PROFILE_IMAGE` in `.env`, and `LSN_REF` (commit) in `salesnav/Dockerfile`. Test a new version on one account first.
 
-**Backups.** Run `podman exec <postgres-container> pg_dump -U <PG_USER> <PG_DB> > linkedin.sql`, or include the `PG_DB` database in n8n's Postgres backups. The `data/<acct>/` directories only hold sessions and can be recreated by logging in again.
+**Backups.** Run `sudo podman exec <postgres-container> pg_dump -U <PG_USER> <PG_DB> > linkedin.sql`, or include the `PG_DB` database in n8n's Postgres backups. The `data/<acct>/` directories only hold sessions and can be recreated by logging in again.
 
 ## Repo layout
 

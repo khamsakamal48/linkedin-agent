@@ -5,7 +5,7 @@ This is for whoever runs the AWS server. The account owner does **not** need ser
 ## How it works
 
 ```
-admin: scripts/add-account.sh acct-a
+admin: sudo scripts/add-account.sh acct-a
           │  starts a one-off browser on the server, behind acct-a's proxy
           ▼
 owner: opens https://LOGIN_DOMAIN/vnc_lite.html#... (+ password)
@@ -32,7 +32,7 @@ Pick a short name: lowercase letters, digits and dashes, for example `acct-a`, `
 
 ```bash
 cd /opt/linkedin-agent
-scripts/add-account.sh acct-a
+sudo scripts/add-account.sh acct-a
 ```
 
 1. **Proxy questions.** Paste the sticky proxy details from the provider dashboard:
@@ -71,9 +71,9 @@ scripts/add-account.sh acct-a
 
 | Symptom | Fix |
 |---|---|
-| Script prints `Login viewer did not start` and some logs | Usually a proxy problem. Check the proxy: `curl -x http://user:pass@host:port https://api.ipify.org`. Fix `accounts/acct-a.env`, then run `scripts/add-account.sh acct-a --relogin`. |
+| Script prints `Login viewer did not start` and some logs | Usually a proxy problem. Check the proxy: `curl -x http://user:pass@host:port https://api.ipify.org`. Fix `accounts/acct-a.env`, then run `sudo scripts/add-account.sh acct-a --relogin`. |
 | Owner gets "401 Authorization Required" | Wrong password, or the login already finished or timed out. Run `--relogin` for a fresh link. |
-| Owner sees a black or grey screen | Wait 10 seconds and reload. If it persists, check `podman logs li-login`. |
+| Owner sees a black or grey screen | Wait 10 seconds and reload. If it persists, check `sudo podman logs li-login`. |
 | `Login did not complete (exit …)` | The owner closed the tab before reaching the feed, or 30 minutes passed. Run `--relogin`. |
 | LinkedIn shows "Let's do a quick security check" / CAPTCHA | Normal for a new IP. The owner completes it in the same window. |
 | LinkedIn says the account is restricted | Stop using that account. Lower the caps. Ask the owner to resolve it on linkedin.com from their own device. |
@@ -83,7 +83,7 @@ scripts/add-account.sh acct-a
 The health workflow emails you when a session is gone. The fix is always:
 
 ```bash
-scripts/add-account.sh acct-a --relogin
+sudo scripts/add-account.sh acct-a --relogin
 ```
 
 This stops that account's server, prints a fresh link and password, and restarts the server when the owner is done. The proxy settings are kept.
@@ -95,8 +95,8 @@ Edit `accounts/acct-a.env`, then **run `--relogin`**. A session moved to a new I
 ## Removing an account
 
 ```bash
-scripts/compose.sh stop li-profile-acct-a
-podman rm -f $(podman ps -aq --filter label=com.docker.compose.service=li-profile-acct-a)
+sudo scripts/compose.sh stop li-profile-acct-a
+sudo podman rm -f $(sudo podman ps -aq --filter label=com.docker.compose.service=li-profile-acct-a)
 # delete the li-profile-acct-a block from docker-compose.accounts.yml
 rm -rf data/acct-a accounts/acct-a.env      # deletes the stored session
 sudo scripts/install-nginx.sh
@@ -116,14 +116,14 @@ Steps:
 cp accounts/salesnav.env.example accounts/salesnav.env
 nano accounts/salesnav.env                    # PROXY_SERVER=http://host:port
 sed -i 's/^COMPOSE_PROFILES=.*/COMPOSE_PROFILES=salesnav/' .env
-mkdir -p data/salesnav && podman run --rm -v "$PWD/data/salesnav:/x:z" docker.io/library/postgres:17 chown 1000:1000 /x   # browser runs as container uid 1000
-scripts/compose.sh up -d --build li-salesnav      # first build takes a few minutes
-scripts/salesnav-password.sh                  # prints username "owner" + a password
+mkdir -p data/salesnav && sudo podman run --rm -v "$PWD/data/salesnav:/x:z" docker.io/library/postgres:17 chown 1000:1000 /x   # browser runs as container uid 1000
+sudo scripts/compose.sh up -d --build li-salesnav      # first build takes a few minutes
+sudo scripts/salesnav-password.sh                  # prints username "owner" + a password
 ```
 
 1. Send the owner `https://<SALESNAV_LOGIN_DOMAIN>/vnc.html` and the password. They click **Connect**, see a browser showing LinkedIn, log in, open Sales Navigator once, and close the tab. Steps are in the owner guide.
 2. Verify: `scripts/mcp-call.sh http://127.0.0.1:8100/mcp linkedin_session_status '{}'` should report an authenticated session.
-3. The page stays available, so you can open it at any time to **watch** the searches run. Rotate its password with `scripts/salesnav-password.sh` when the owner no longer needs it.
+3. The page stays available, so you can open it at any time to **watch** the searches run. Rotate its password with `sudo scripts/salesnav-password.sh` when the owner no longer needs it.
 
 Re-login is the same: send the page again and the owner logs in inside the same browser. No restart is needed.
 
