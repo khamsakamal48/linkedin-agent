@@ -23,7 +23,7 @@ Why this design:
 ## Before the first account (once)
 
 1. Finish README steps 1–2 (install, `.env`, database in n8n's Postgres).
-2. Run `sudo scripts/install-nginx.sh` and `sudo certbot --nginx -d <MCP_DOMAIN> -d <LOGIN_DOMAIN> -d <SALESNAV_LOGIN_DOMAIN>` (README step 3). Leave out `-d <SALESNAV_LOGIN_DOMAIN>` if you are not using Sales Navigator yet.
+2. Run `sudo scripts/install-nginx.sh` and `sudo certbot --nginx -d <LOGIN_DOMAIN> -d <SALESNAV_LOGIN_DOMAIN>` (README step 3). Leave out `-d <SALESNAV_LOGIN_DOMAIN>` if you are not using Sales Navigator yet.
 3. Open `https://<LOGIN_DOMAIN>/` in a browser. It should ask for a password and reject every attempt. That is correct: no login is running.
 
 ## Adding a profile-scraping account
@@ -59,9 +59,8 @@ sudo scripts/add-account.sh acct-a
    *Testing with your own account:* open the link yourself and do the owner steps.
    You can also watch the login live. Open the same link: two viewers can share the screen. This helps when guiding the owner over a call.
 5. When the owner reaches their LinkedIn feed, the login browser saves the session and exits. The script prints `Logged in. li-profile-acct-a is running.`
-6. Publish the MCP route and verify:
+6. Verify:
    ```bash
-   sudo scripts/install-nginx.sh && sudo certbot --nginx   # certbot again because the file was re-rendered
    scripts/mcp-call.sh http://127.0.0.1:8201/mcp get_my_profile '{}'
    ```
    `get_my_profile` should return the owner's own profile text.
@@ -99,7 +98,6 @@ sudo scripts/compose.sh stop li-profile-acct-a
 sudo podman rm -f $(sudo podman ps -aq --filter label=com.docker.compose.service=li-profile-acct-a)
 # delete the li-profile-acct-a block from docker-compose.accounts.yml
 rm -rf data/acct-a accounts/acct-a.env      # deletes the stored session
-sudo scripts/install-nginx.sh
 ```
 
 Also remove it from the n8n health and ingest workflows. Tell the owner they can also sign out all sessions from LinkedIn → Settings → Sign in & security → Where you're signed in.

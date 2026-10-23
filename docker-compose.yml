@@ -19,7 +19,7 @@ services:
     volumes:
       - ./data/salesnav:/data:z
     ports:
-      - "127.0.0.1:8100:8000"   # MCP (Nginx -> Claude)
+      - "127.0.0.1:8100:8000"   # MCP, loopback only (scripts/mcp-call.sh checks)
       - "127.0.0.1:6081:6080"   # noVNC login/watch page (Nginx -> account owner)
     shm_size: 1gb
     networks: [linkedin]

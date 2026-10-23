@@ -1,0 +1,123 @@
+{
+  "name": "LinkedIn – MCP server for Claude",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "linkedin",
+        "authentication": "bearerAuth",
+        "instructions": "LinkedIn data for CSR research. Every call goes through the n8n workflows: results are cached for 90 days, capped per account per day, paced 30-90 s apart and saved to Postgres. Profile calls take 1-5 minutes when not cached; do not call tools in parallel. A 429 means the daily cap is reached: stop and tell the user."
+      },
+      "id": "5a50d486-4c3e-4434-bf86-135e6b53f955",
+      "name": "MCP Server Trigger",
+      "type": "@n8n/n8n-nodes-langchain.mcpTrigger",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "a4d2df55-4e8f-4527-beca-ea2a90a0d368",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn MCP bearer"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Get one LinkedIn person's full profile (every job and degree) as JSON. Returns the cached copy when it is under 90 days old.",
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/linkedin-profile",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ url: $fromAI('url', 'LinkedIn profile URL, https://www.linkedin.com/in/<id>/', 'string'), force: $fromAI('force', 'true only when the user asks for a fresh scrape despite a cached copy', 'boolean', false) }) }}",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "a740653f-e46f-4949-961a-a54bf9a5d697",
+      "name": "scrape_profile",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        -200,
+        220
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn webhook"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "toolDescription": "Find people at a company who own or influence CSR spend (CSR, sustainability, ESG, foundation, senior HR) via Sales Navigator. Returns leads scored 5-10 with a reason, and saves them.",
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/csr-leads",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ company: $fromAI('company', 'Company name as on LinkedIn', 'string'), cin: $fromAI('cin', 'Indian CIN of the company if known, else empty', 'string', '') }) }}",
+        "options": {
+          "timeout": 600000,
+          "response": {
+            "response": {
+              "neverError": true
+            }
+          }
+        }
+      },
+      "id": "279c54d1-b1f1-46f9-a08d-cc07a8d16173",
+      "name": "find_csr_leads",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.5,
+      "position": [
+        200,
+        220
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn webhook"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "scrape_profile": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "find_csr_leads": {
+      "ai_tool": [
+        [
+          {
+            "node": "MCP Server Trigger",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

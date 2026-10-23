@@ -6,7 +6,8 @@
         "httpMethod": "POST",
         "path": "csr-leads",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {},
+        "authentication": "headerAuth"
       },
       "id": "6c0cbf5a-d9c0-5f27-b44c-e770cf84f49d",
       "name": "Webhook",
@@ -16,7 +17,13 @@
         0,
         300
       ],
-      "webhookId": "3f71a819-9038-5ccd-9fcc-91aa1c4cc391"
+      "webhookId": "3f71a819-9038-5ccd-9fcc-91aa1c4cc391",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn webhook"
+        }
+      }
     },
     {
       "parameters": {
@@ -80,7 +87,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const leads = new Map();\nconst errors = [];\nfor (const item of $('Sales Navigator search').all()) {\n  if (item.json.error) { errors.push(String(item.json.error.message ?? item.json.error)); continue; }\n  const r = item.json.structuredContent ?? item.json.content?.find(c => c.type === 'text')?.text ?? item.json;\n  const res = typeof r === 'string' ? JSON.parse(r) : r;\n  for (const l of res.leads ?? []) if (l.salesNavUrl) leads.set(l.salesNavUrl, l);\n}\nconst cfg = $('Config').first().json;\nconst list = [...leads.values()];\nif (!list.length) return [{ json: { company: cfg.company, cin: cfg.cin, leads: [], errors } }];\nconst request = {\n  model: 'claude-sonnet-5-5', max_tokens: 8000,\n  tools: [{ name: 'rank_leads', description: 'Score each lead.', input_schema: { type: 'object', properties: {\n    leads: { type: 'array', items: { type: 'object', properties: {\n      salesNavUrl: { type: 'string' }, score: { type: 'integer', minimum: 0, maximum: 10 },\n      match_reason: { type: 'string' } }, required: ['salesNavUrl', 'score', 'match_reason'] } } },\n    required: ['leads'] } }],\n  tool_choice: { type: 'tool', name: 'rank_leads' },\n  messages: [{ role: 'user', content:\n    'We want to start a CSR partnership with ' + cfg.company + '. Score each Sales Navigator lead 0-10 for how likely ' +\n    'they own or strongly influence CSR spend at THIS company: CSR head / foundation head / sustainability or ESG head = 8-10; ' +\n    'CHRO or senior HR who may hold CSR = 6-8; junior or unrelated roles, or a different employer = 0-3. ' +\n    'Give a one-line match_reason.\\n\\n' + JSON.stringify(list) }] };\nreturn [{ json: { company: cfg.company, cin: cfg.cin, leads: list, errors, request } }];",
+        "jsCode": "const leads = new Map();\nconst errors = [];\nfor (const item of $('Sales Navigator search').all()) {\n  if (item.json.error) { errors.push(String(item.json.error.message ?? item.json.error)); continue; }\n  const r = item.json.structuredContent ?? item.json.content?.find(c => c.type === 'text')?.text ?? item.json;\n  const res = typeof r === 'string' ? JSON.parse(r) : r;\n  for (const l of res.leads ?? []) if (l.salesNavUrl) leads.set(l.salesNavUrl, l);\n}\nconst cfg = $('Config').first().json;\nconst list = [...leads.values()];\nif (!list.length) return [{ json: { company: cfg.company, cin: cfg.cin, leads: [], errors } }];\nconst text = 'We want to start a CSR partnership with ' + cfg.company + '. Score each Sales Navigator lead below.\\n\\n' + JSON.stringify(list);\nreturn [{ json: { company: cfg.company, cin: cfg.cin, leads: list, errors, text } }];",
         "mode": "runOnceForAllItems"
       },
       "id": "2207d3de-3326-5ac9-9afd-1869dc09c1d5",
@@ -144,44 +151,25 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "anthropicApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "text": "={{ $json.text }}",
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"leads\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"salesNavUrl\": {\n            \"type\": \"string\"\n          },\n          \"score\": {\n            \"type\": \"integer\",\n            \"minimum\": 0,\n            \"maximum\": 10\n          },\n          \"match_reason\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"salesNavUrl\",\n          \"score\",\n          \"match_reason\"\n        ]\n      }\n    }\n  },\n  \"required\": [\n    \"leads\"\n  ]\n}",
         "options": {
-          "timeout": 180000
+          "systemPromptTemplate": "You score Sales Navigator leads 0-10 for how likely they own or strongly influence CSR spend at the named company: CSR head / foundation head / sustainability or ESG head = 8-10; CHRO or senior HR who may hold CSR = 6-8; junior or unrelated roles, or a different employer = 0-3. Return every lead with its salesNavUrl unchanged and a one-line match_reason."
         }
       },
       "id": "aa34426f-a262-5ed4-87c4-4e35ddca880a",
-      "name": "Claude: rank leads",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "name": "Rank leads",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
       "position": [
         1320,
         220
-      ],
-      "credentials": {
-        "anthropicApi": {
-          "id": "REPLACE_ME",
-          "name": "Anthropic"
-        }
-      }
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const prev = $('Collect leads').first().json;\nconst toolUse = ($json.content ?? []).find(c => c.type === 'tool_use');\nif (!toolUse) throw new Error('Ranking returned nothing: ' + JSON.stringify($json).slice(0, 500));\nconst byUrl = new Map(toolUse.input.leads.map(x => [x.salesNavUrl, x]));\nconst ranked = prev.leads\n  .map(l => ({ ...l, ...(byUrl.get(l.salesNavUrl) ?? { score: 0, match_reason: 'not ranked' }) }))\n  .filter(l => l.score >= 5)\n  .sort((a, b) => b.score - a.score);\nreturn [{ json: { company: prev.company, cin: prev.cin, ranked, leadsJson: JSON.stringify(ranked), errors: prev.errors } }];"
+        "jsCode": "const prev = $('Collect leads').first().json;\nconst scored = $json.output?.leads;\nif (!Array.isArray(scored)) throw new Error('Ranking returned nothing: ' + JSON.stringify($json).slice(0, 500));\nconst byUrl = new Map(scored.map(x => [x.salesNavUrl, x]));\nconst ranked = prev.leads\n  .map(l => ({ ...l, ...(byUrl.get(l.salesNavUrl) ?? { score: 0, match_reason: 'not ranked' }) }))\n  .filter(l => l.score >= 5)\n  .sort((a, b) => b.score - a.score);\nreturn [{ json: { company: prev.company, cin: prev.cin, ranked, leadsJson: JSON.stringify(ranked), errors: prev.errors } }];"
       },
       "id": "1a7f79b4-faef-59ef-9b47-9b5d791f86ae",
       "name": "Merge ranking",
@@ -231,6 +219,32 @@
         1980,
         220
       ]
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-2.5-flash-lite",
+        "options": {
+          "temperature": 0,
+          "maxTokens": 8000,
+          "providerRouting": {
+            "requireParameters": true
+          }
+        }
+      },
+      "id": "9fecb0cd-87b0-42dc-86e0-adc0dd04fdeb",
+      "name": "OpenRouter",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        1460,
+        400
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "REPLACE_ME",
+          "name": "OpenRouter"
+        }
+      }
     }
   ],
   "connections": {
@@ -293,7 +307,7 @@
       "main": [
         [
           {
-            "node": "Claude: rank leads",
+            "node": "Rank leads",
             "type": "main",
             "index": 0
           }
@@ -301,17 +315,6 @@
         [
           {
             "node": "Respond no leads",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Claude: rank leads": {
-      "main": [
-        [
-          {
-            "node": "Merge ranking",
             "type": "main",
             "index": 0
           }
@@ -335,6 +338,28 @@
           {
             "node": "Respond leads",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rank leads": {
+      "main": [
+        [
+          {
+            "node": "Merge ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Rank leads",
+            "type": "ai_languageModel",
             "index": 0
           }
         ]

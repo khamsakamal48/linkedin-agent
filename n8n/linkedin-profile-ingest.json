@@ -6,7 +6,8 @@
         "httpMethod": "POST",
         "path": "linkedin-profile",
         "responseMode": "responseNode",
-        "options": {}
+        "options": {},
+        "authentication": "headerAuth"
       },
       "id": "6c0cbf5a-d9c0-5f27-b44c-e770cf84f49d",
       "name": "Webhook",
@@ -16,7 +17,13 @@
         0,
         300
       ],
-      "webhookId": "f62c032a-9683-5b18-b4e0-9355941e89f9"
+      "webhookId": "f62c032a-9683-5b18-b4e0-9355941e89f9",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "REPLACE_ME",
+          "name": "LinkedIn webhook"
+        }
+      }
     },
     {
       "parameters": {
@@ -293,10 +300,10 @@
     },
     {
       "parameters": {
-        "jsCode": "const r = $json.structuredContent ?? $json.content?.find(c => c.type === 'text')?.text ?? $json;\nconst cfg = $('Config').first().json;\nconst schema = {\n  type: 'object',\n  properties: {\n    full_name: { type: 'string' }, headline: { type: 'string' }, location: { type: 'string' },\n    about: { type: 'string' }, current_company: { type: 'string' }, current_title: { type: 'string' },\n    employment: { type: 'array', items: { type: 'object', properties: {\n      company_name: { type: 'string' }, company_linkedin_url: { type: 'string' }, title: { type: 'string' },\n      employment_type: { type: 'string' }, location: { type: 'string' },\n      start_date: { type: 'string', description: 'YYYY-MM or YYYY' },\n      end_date: { type: 'string', description: 'YYYY-MM or YYYY; empty if current' },\n      is_current: { type: 'boolean' }, description: { type: 'string' } },\n      required: ['company_name', 'title'] } },\n    education: { type: 'array', items: { type: 'object', properties: {\n      school: { type: 'string' }, school_linkedin_url: { type: 'string' }, degree: { type: 'string' },\n      field_of_study: { type: 'string' }, start_year: { type: 'integer' }, end_year: { type: 'integer' } },\n      required: ['school'] } } },\n  required: ['full_name', 'employment', 'education'] };\nconst request = {\n  model: 'claude-haiku-5-5', max_tokens: 16000,\n  tools: [{ name: 'save_profile', description: 'Save the structured LinkedIn profile.', input_schema: schema }],\n  tool_choice: { type: 'tool', name: 'save_profile' },\n  messages: [{ role: 'user', content:\n    'Below is raw text scraped from a LinkedIn profile (main page plus experience and education sections). ' +\n    'Extract every job and every degree, newest first. A company with several roles yields one entry per role. ' +\n    'Use only facts present in the text; leave a field out when unknown. Profile URL: ' + cfg.url +\n    '\\n\\n' + JSON.stringify(r) }] };\nreturn [{ json: { request, raw: r } }];"
+        "jsCode": "// Scraper output (page text per section) goes to the extractor as one string; raw is kept for the person.raw column.\nconst raw = $json.structuredContent ?? $json.content?.find(c => c.type === 'text')?.text ?? $json;\nconst cfg = $('Config').first().json;\nreturn [{ json: { raw, text: 'Profile URL: ' + cfg.url + '\\n\\n' + (typeof raw === 'string' ? raw : JSON.stringify(raw)) } }];"
       },
       "id": "2d93ab2e-dc4a-5ea7-bd88-1b6d9533cc45",
-      "name": "Build extraction request",
+      "name": "Prepare text",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
@@ -306,44 +313,25 @@
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "https://api.anthropic.com/v1/messages",
-        "authentication": "predefinedCredentialType",
-        "nodeCredentialType": "anthropicApi",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            }
-          ]
-        },
-        "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json.request) }}",
+        "text": "={{ $json.text }}",
+        "schemaType": "manual",
+        "inputSchema": "{\n  \"type\": \"object\",\n  \"properties\": {\n    \"full_name\": {\n      \"type\": \"string\"\n    },\n    \"headline\": {\n      \"type\": \"string\"\n    },\n    \"location\": {\n      \"type\": \"string\"\n    },\n    \"about\": {\n      \"type\": \"string\"\n    },\n    \"current_company\": {\n      \"type\": \"string\"\n    },\n    \"current_title\": {\n      \"type\": \"string\"\n    },\n    \"employment\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"company_name\": {\n            \"type\": \"string\"\n          },\n          \"company_linkedin_url\": {\n            \"type\": \"string\"\n          },\n          \"title\": {\n            \"type\": \"string\"\n          },\n          \"employment_type\": {\n            \"type\": \"string\"\n          },\n          \"location\": {\n            \"type\": \"string\"\n          },\n          \"start_date\": {\n            \"type\": \"string\",\n            \"description\": \"YYYY-MM or YYYY\"\n          },\n          \"end_date\": {\n            \"type\": \"string\",\n            \"description\": \"YYYY-MM or YYYY; empty if current\"\n          },\n          \"is_current\": {\n            \"type\": \"boolean\"\n          },\n          \"description\": {\n            \"type\": \"string\"\n          }\n        },\n        \"required\": [\n          \"company_name\",\n          \"title\"\n        ]\n      }\n    },\n    \"education\": {\n      \"type\": \"array\",\n      \"items\": {\n        \"type\": \"object\",\n        \"properties\": {\n          \"school\": {\n            \"type\": \"string\"\n          },\n          \"school_linkedin_url\": {\n            \"type\": \"string\"\n          },\n          \"degree\": {\n            \"type\": \"string\"\n          },\n          \"field_of_study\": {\n            \"type\": \"string\"\n          },\n          \"start_year\": {\n            \"type\": \"integer\"\n          },\n          \"end_year\": {\n            \"type\": \"integer\"\n          }\n        },\n        \"required\": [\n          \"school\"\n        ]\n      }\n    }\n  },\n  \"required\": [\n    \"full_name\",\n    \"employment\",\n    \"education\"\n  ]\n}",
         "options": {
-          "timeout": 180000
+          "systemPromptTemplate": "You turn raw text scraped from a LinkedIn profile (main page plus experience and education sections) into structured data. Extract every job and every degree, newest first. A company with several roles yields one entry per role. Use only facts present in the text; leave a field out when unknown."
         }
       },
       "id": "e3a00e86-1e9c-53f0-b8bc-f2db589a3a5b",
-      "name": "Claude: structure profile",
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.2,
+      "name": "Structure profile",
+      "type": "@n8n/n8n-nodes-langchain.informationExtractor",
+      "typeVersion": 1.2,
       "position": [
         2200,
         260
-      ],
-      "credentials": {
-        "anthropicApi": {
-          "id": "REPLACE_ME",
-          "name": "Anthropic"
-        }
-      }
+      ]
     },
     {
       "parameters": {
-        "jsCode": "const cfg = $('Config').first().json;\nconst toolUse = ($json.content ?? []).find(c => c.type === 'tool_use');\nif (!toolUse) throw new Error('Extraction returned no structured profile: ' + JSON.stringify($json).slice(0, 500));\nconst payload = { ...toolUse.input, linkedin_url: cfg.url, raw: $('Build extraction request').first().json.raw, source: cfg.account };\nreturn [{ json: { payload: JSON.stringify(payload) } }];"
+        "jsCode": "const cfg = $('Config').first().json;\nconst out = $json.output;\nif (!out?.full_name || !Array.isArray(out.employment)) throw new Error('Extraction returned no structured profile: ' + JSON.stringify($json).slice(0, 500));\nconst payload = { ...out, linkedin_url: cfg.url, raw: $('Prepare text').first().json.raw, source: cfg.account };\nreturn [{ json: { payload: JSON.stringify(payload) } }];"
       },
       "id": "b80d9080-1065-5de8-b65e-45cf3ad3c915",
       "name": "Build DB payload",
@@ -439,6 +427,32 @@
         3300,
         260
       ]
+    },
+    {
+      "parameters": {
+        "model": "google/gemini-2.5-flash-lite",
+        "options": {
+          "temperature": 0,
+          "maxTokens": 16000,
+          "providerRouting": {
+            "requireParameters": true
+          }
+        }
+      },
+      "id": "9f359db7-12ab-42ad-95ea-994c9fe82d84",
+      "name": "OpenRouter",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenRouter",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        460
+      ],
+      "credentials": {
+        "openRouterApi": {
+          "id": "REPLACE_ME",
+          "name": "OpenRouter"
+        }
+      }
     }
   ],
   "connections": {
@@ -555,7 +569,7 @@
         ],
         [
           {
-            "node": "Build extraction request",
+            "node": "Prepare text",
             "type": "main",
             "index": 0
           }
@@ -567,28 +581,6 @@
         [
           {
             "node": "Respond scrape error",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Build extraction request": {
-      "main": [
-        [
-          {
-            "node": "Claude: structure profile",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Claude: structure profile": {
-      "main": [
-        [
-          {
-            "node": "Build DB payload",
             "type": "main",
             "index": 0
           }
@@ -634,6 +626,39 @@
           {
             "node": "Respond scraped",
             "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare text": {
+      "main": [
+        [
+          {
+            "node": "Structure profile",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Structure profile": {
+      "main": [
+        [
+          {
+            "node": "Build DB payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenRouter": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Structure profile",
+            "type": "ai_languageModel",
             "index": 0
           }
         ]

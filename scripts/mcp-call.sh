@@ -2,14 +2,12 @@
 # Call one MCP tool over streamable HTTP and print the JSON-RPC result.
 #   scripts/mcp-call.sh http://127.0.0.1:8201/mcp tools/list
 #   scripts/mcp-call.sh http://127.0.0.1:8201/mcp get_my_profile '{}'
-# Set MCP_TOKEN to send "Authorization: Bearer $MCP_TOKEN" (for the public Nginx URL).
 set -euo pipefail
 url=${1:?usage: mcp-call.sh <url> <tool|tools/list> [json-args]}
 tool=${2:?tool name or tools/list}
 args=${3:-{\}}
 
 hdrs=(-H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream')
-[[ -n "${MCP_TOKEN:-}" ]] && hdrs+=(-H "Authorization: Bearer $MCP_TOKEN")
 tmp=$(mktemp); trap 'rm -f "$tmp"' EXIT
 
 # Streamable HTTP answers either plain JSON or SSE; keep only the JSON payload.

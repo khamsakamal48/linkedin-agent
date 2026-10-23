@@ -34,7 +34,7 @@ if [[ "$mode" == new ]]; then
   printf 'PROXY_SERVER=%s\nPROXY_USERNAME=%s\nPROXY_PASSWORD=%s\n' "$proxy" "$puser" "$ppass" > "$envf"
   umask 022
 
-  # Next free host port from 8201 up, published on loopback for Nginx.
+  # Next free host port from 8201 up, published on loopback for scripts/mcp-call.sh checks.
   port=8201
   while grep -q "127.0.0.1:$port:" "$accounts_yml"; do port=$((port+1)); done
   # Replace the empty map on first use, then append the service.
@@ -47,7 +47,7 @@ if [[ "$mode" == new ]]; then
     environment:
       LOG_LEVEL: WARNING
       EXPERIMENTAL_PERSIST_DERIVED_RUNTIME: "true"
-      # n8n reaches this service by its compose name; Nginx rewrites Host to localhost.
+      # n8n reaches this service by its compose name; mcp-call.sh uses localhost.
       FASTMCP_HTTP_ALLOWED_HOSTS: '["$svc","$svc:8080","localhost","localhost:8080"]'
     volumes:
       - ./$datadir:/home/pwuser/.linkedin-mcp:z

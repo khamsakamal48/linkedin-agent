@@ -1,16 +1,7 @@
 # Rendered by scripts/install-nginx.sh (envsubst). Do not edit the rendered copy.
 # TLS lines are added by certbot (--nginx).
 
-# --- MCP endpoints for Claude (n8n uses the podman network directly) ---
-server {
-    listen 80;
-    server_name ${MCP_DOMAIN};
-
-    # Upstreams per account are written by install-nginx.sh
-    include ${REPO_DIR}/nginx/rendered/mcp-locations.conf;
-
-    location / { return 404; }
-}
+# No MCP endpoints here: n8n reaches the MCP servers on the podman network, and Claude connects to n8n.
 
 # --- LinkedIn login page for profile accounts (scripts/add-account.sh) ---
 server {
