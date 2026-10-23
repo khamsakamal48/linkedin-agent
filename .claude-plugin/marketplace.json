@@ -1,0 +1,14 @@
+{
+  "name": "linkedin-agent",
+  "owner": {
+    "name": "Kamal Thampi"
+  },
+  "description": "Claude Code plugins for the LinkedIn Agent stack.",
+  "plugins": [
+    {
+      "name": "linkedin-agent",
+      "source": "./claude-plugin",
+      "description": "LinkedIn profile scraping and CSR lead discovery through the team's n8n MCP server."
+    }
+  ]
+}

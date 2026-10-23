@@ -1,0 +1,8 @@
+{
+  "name": "linkedin-agent",
+  "version": "1.0.0",
+  "description": "Connects Claude Code to the LinkedIn Agent n8n MCP server (scrape_profile, find_csr_leads) and teaches Claude how to use it.",
+  "author": {
+    "name": "Kamal Thampi"
+  }
+}

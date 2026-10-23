@@ -187,14 +187,24 @@ Use the webhooks from your research agents (n8n HTTP Request nodes with the `Lin
 
 Activate **LinkedIn – MCP server for Claude** in n8n. Then, on each user's machine:
 
-```bash
-claude mcp add --transport http linkedin https://<n8n-domain>/mcp/linkedin \
-  --header "Authorization: Bearer <LinkedIn MCP bearer token>"
-```
+1. Add to `env` in `~/.claude/settings.json` (create the `env` block if it is missing):
+   ```json
+   "env": {
+     "LINKEDIN_MCP_URL": "https://<n8n-domain>/mcp/linkedin",
+     "LINKEDIN_MCP_TOKEN": "<LinkedIn MCP bearer token>",
+     "MCP_TOOL_TIMEOUT": "600000"
+   }
+   ```
+   `MCP_TOOL_TIMEOUT` makes Claude Code wait for an uncached profile, which takes 1–5 minutes (pause plus scrape).
+2. Install the plugin from this repository, then restart Claude Code:
+   ```
+   /plugin marketplace add khamsakamal48/linkedin-agent
+   /plugin install linkedin-agent@linkedin-agent
+   ```
 
-Claude Code then has two tools, `scrape_profile` and `find_csr_leads`. They run the same workflows as the webhooks, so their results are cached, capped, paced and saved like any other call.
+The plugin (`claude-plugin/`) registers the `linkedin` MCP server and a `linkedin-research` skill that tells Claude how to use it: one call at a time, respect the cache and the daily caps, and stop when a cap is reached. Claude Code then has two tools, `scrape_profile` and `find_csr_leads`. They run the same workflows as the webhooks, so their results are cached, capped, paced and saved like any other call.
 
-An uncached profile takes 1–5 minutes (pause plus scrape). Raise Claude Code's MCP tool timeout so it waits: add `"MCP_TOOL_TIMEOUT": "600000"` to `env` in `~/.claude/settings.json`.
+Without the plugin, register only the server: `claude mcp add --transport http linkedin https://<n8n-domain>/mcp/linkedin --header "Authorization: Bearer <token>"`.
 
 If n8n sits behind a reverse proxy, that proxy must not buffer `/mcp/` responses (for Nginx: `proxy_buffering off;`), or the MCP stream stalls.
 
@@ -263,5 +273,7 @@ scripts/install-nginx.sh      render + install the Nginx login pages
 scripts/mcp-call.sh           call any MCP tool from the shell (debugging)
 scripts/salesnav-password.sh  set the Sales Navigator page password
 n8n/                          workflows to import
+claude-plugin/                Claude Code plugin: MCP connection + linkedin-research skill
+.claude-plugin/               marketplace entry so /plugin can install claude-plugin/ from this repo
 docs/                         account setup (admin) and owner guide
 ```

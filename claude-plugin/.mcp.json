@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "linkedin": {
+      "type": "http",
+      "url": "${LINKEDIN_MCP_URL}",
+      "headers": { "Authorization": "Bearer ${LINKEDIN_MCP_TOKEN}" }
+    }
+  }
+}
