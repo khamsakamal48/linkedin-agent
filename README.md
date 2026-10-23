@@ -36,14 +36,14 @@ Each LinkedIn account runs in its own container, with its own saved session and 
   Fedora does not start Nginx after install, and SELinux stops it from proxying to local ports. `install-nginx.sh` turns on the `httpd_can_network_connect` SELinux boolean for you.
 - `git`, `openssl`, `envsubst` (`sudo dnf -y install git openssl /usr/bin/envsubst`).
 - If `firewalld` is running (`sudo firewall-cmd --state`), open HTTP and HTTPS: `sudo firewall-cmd --permanent --add-service={http,https} && sudo firewall-cmd --reload`. Fedora Cloud images on EC2 usually do not run it.
-- Three DNS **A records** pointing at the instance's public IP:
+- DNS **A records** pointing at the instance's public IP:
   - `MCP_DOMAIN` (for example `li-mcp.yourorg.com`): MCP endpoints for Claude
   - `LOGIN_DOMAIN` (for example `li-login.yourorg.com`): the page where account owners log in
-  - `SALESNAV_LOGIN_DOMAIN` (for example `sn-login.yourorg.com`): the Sales Navigator browser page
+  - `SALESNAV_LOGIN_DOMAIN` (for example `sn-login.yourorg.com`): the Sales Navigator browser page. Optional until you set up Sales Navigator (step 5).
 - Security group: allow inbound 80 and 443. **Do not** open 6080, 6081, 8100 or 82xx. They bind to `127.0.0.1` only.
 - One **sticky residential/ISP proxy per LinkedIn account** (for example Bright Data, Oxylabs, IPRoyal or Smartproxy). Ask for a "sticky session" that keeps one IP for days, never per-request rotation.
   - Profile accounts accept `user:password` proxies.
-  - The Sales Navigator browser needs an **IP-whitelisted** proxy endpoint: whitelist the EC2 public IP at the provider.
+  - The Sales Navigator browser needs an **IP-whitelisted** proxy endpoint: whitelist the EC2 public IP at the provider. Only needed for step 5.
   - Testing without a proxy works, but the login then comes from an AWS datacenter IP, which LinkedIn trusts less.
 
 ## 2. Install
@@ -80,30 +80,16 @@ If `PG_USER` already exists in that Postgres, drop the `create role` line. `db/s
 
 > The scripts are executable in git. If you copied the files some other way, run `chmod +x scripts/*.sh`.
 
-## 3. Add a LinkedIn account (profile scraping)
+## 3. Nginx + TLS (before the first account)
 
-The full walkthrough, with what the owner sees, is in **[docs/ACCOUNT-SETUP.md](docs/ACCOUNT-SETUP.md)**. In short:
-
-```bash
-sudo scripts/add-account.sh acct-a          # asks for the proxy, prints a link + password
-sudo scripts/install-nginx.sh          # (first time / after adding an account) publishes the routes
-```
-
-1. Send the printed link and password to the account owner (yourself while testing). The one-page guide for owners is [docs/OWNER-GUIDE.md](docs/OWNER-GUIDE.md).
-2. The owner opens the link, signs in to LinkedIn and approves 2FA. When the login finishes, the script starts `li-profile-acct-a`.
-3. Check it:
-   ```bash
-   scripts/mcp-call.sh http://127.0.0.1:8201/mcp get_my_profile '{}'
-   ```
-
-**Nobody on our side ever sees the LinkedIn password.** The owner types it into a browser that runs on this server. Only the session cookies are stored, in `data/<account>/`.
-
-## 4. Nginx + TLS
+Do this before adding any account. The owner's login page (`https://LOGIN_DOMAIN/`) and Claude's MCP endpoints only exist once Nginx serves them, and without TLS the page password and the bearer token would cross the internet in plain text.
 
 ```bash
 sudo scripts/install-nginx.sh
 sudo certbot --nginx -d li-mcp.yourorg.com -d li-login.yourorg.com -d sn-login.yourorg.com
 ```
+
+Not using Sales Navigator yet? Leave `-d sn-login.yourorg.com` out of the certbot command (it fails if that DNS record does not exist). `SALESNAV_LOGIN_DOMAIN` must still be set in `.env`, because `install-nginx.sh` renders its server block. Add the domain later with `sudo certbot --nginx -d sn-login.yourorg.com` when you reach step 5.
 
 `install-nginx.sh` renders `nginx/linkedin-agent.conf.tmpl` from `.env` and adds one `/<service>/mcp` route per account. It links the result into `/etc/nginx/conf.d/` and reloads Nginx. **Re-run it after every new account.** Certbot edits the rendered file in place to add TLS, so after re-running `install-nginx.sh`, run `sudo certbot --nginx` again (it reuses the existing certificates).
 
@@ -116,8 +102,28 @@ Routes:
 | `https://LOGIN_DOMAIN/` | login browser (only while `add-account.sh` is waiting) | one-time password printed by the script |
 | `https://SALESNAV_LOGIN_DOMAIN/` | Sales Navigator browser | password from `sudo scripts/salesnav-password.sh` |
 
-Check: `curl -s -o /dev/null -w '%{http_code}\n' https://li-mcp.yourorg.com/li-profile-acct-a/mcp` should print `401`, and
-`MCP_TOKEN=<token> scripts/mcp-call.sh https://li-mcp.yourorg.com/li-profile-acct-a/mcp tools/list` should list the tools.
+Check before going on:
+- `curl -s -o /dev/null -w '%{http_code}\n' https://li-mcp.yourorg.com/li-salesnav/mcp` prints `401` (the token check runs before any account exists).
+- `https://li-login.yourorg.com/` opens over HTTPS, asks for a password and rejects every attempt. That is correct: no login is running.
+
+## 4. Add a LinkedIn account (profile scraping)
+
+The full walkthrough, with what the owner sees, is in **[docs/ACCOUNT-SETUP.md](docs/ACCOUNT-SETUP.md)**. In short:
+
+```bash
+sudo scripts/add-account.sh acct-a          # asks for the proxy, prints a link + password
+sudo scripts/install-nginx.sh && sudo certbot --nginx   # after the login: publishes this account's route
+```
+
+1. Send the printed link and password to the account owner (yourself while testing). The one-page guide for owners is [docs/OWNER-GUIDE.md](docs/OWNER-GUIDE.md).
+2. The owner opens the link, signs in to LinkedIn and approves 2FA. When the login finishes, the script starts `li-profile-acct-a`.
+3. Check it, locally and through Nginx:
+   ```bash
+   scripts/mcp-call.sh http://127.0.0.1:8201/mcp get_my_profile '{}'
+   MCP_TOKEN=<token> scripts/mcp-call.sh https://li-mcp.yourorg.com/li-profile-acct-a/mcp tools/list
+   ```
+
+**Nobody on our side ever sees the LinkedIn password.** The owner types it into a browser that runs on this server. Only the session cookies are stored, in `data/<account>/`.
 
 ## 5. Sales Navigator account
 
